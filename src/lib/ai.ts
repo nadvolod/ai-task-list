@@ -89,7 +89,7 @@ export async function transcribeAndParseVoice(
   // Step 1: Transcribe audio using Whisper
   const transcription = await client.audio.transcriptions.create({
     model: 'whisper-1',
-    file: new File([audioBuffer.buffer as ArrayBuffer], filename, { type: 'audio/webm' }),
+    file: new File([new Uint8Array(audioBuffer)], filename, { type: 'audio/webm' }),
     response_format: 'text',
   });
 
@@ -134,7 +134,7 @@ Interpret context clues:
   } catch {
     const jsonMatch = metaContent.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      try { metadata = JSON.parse(jsonMatch[0]); } catch { /* empty */ }
+      try { metadata = JSON.parse(jsonMatch[0]); } catch (innerErr) { console.error('Voice metadata parse error:', innerErr); }
     }
   }
 

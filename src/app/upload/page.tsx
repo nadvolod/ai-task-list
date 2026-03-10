@@ -22,6 +22,12 @@ export default function UploadPage() {
     setError('');
   }
 
+  function handleClearPreview() {
+    setPreview(null);
+    setFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
   async function handleUpload() {
     if (!file) return;
     setLoading(true);
@@ -87,7 +93,8 @@ export default function UploadPage() {
                 className="w-full rounded-lg object-contain max-h-64 bg-gray-100"
               />
               <button
-                onClick={() => { setPreview(null); setFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                onClick={handleClearPreview}
+                aria-label="Remove selected image"
                 className="absolute top-2 right-2 bg-white rounded-full p-1 shadow text-gray-500 hover:text-red-500 transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

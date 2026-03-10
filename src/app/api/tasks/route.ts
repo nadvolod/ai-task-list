@@ -6,7 +6,7 @@ import { tasks } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { calculatePriority } from '@/lib/priority';
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
