@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createTestUser, cleanupTestUser, mockSession, mockNoSession, getTestDb } from '../helpers/db';
 import * as schema from '../../src/lib/db/schema';
-import { eq } from 'drizzle-orm';
 
 // NO OpenAI mock — these tests use real API calls
 // Import route and AI function directly (no mocks)
@@ -10,7 +9,6 @@ const { POST } = await import('../../src/app/api/voice-command/route');
 const { parseVoiceCommand } = await import('../../src/lib/ai');
 
 let testUserId: number;
-let testTaskIds: number[] = [];
 
 beforeAll(async () => {
   const user = await createTestUser('voice-cmd-test');
@@ -43,7 +41,6 @@ beforeAll(async () => {
     urgency: 2,
   }).returning();
 
-  testTaskIds = [task1.id, task2.id, task3.id];
 });
 
 afterAll(async () => {
