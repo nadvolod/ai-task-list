@@ -1,0 +1,21 @@
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { redirect } from 'next/navigation';
+import { db } from '@/lib/db';
+import { tasks } from '@/lib/db/schema';
+import { eq, desc } from 'drizzle-orm';
+import TaskListClient from './TaskListClient';
+
+export default async function TasksPage() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) redirect('/auth/signin');
+
+  const userId = parseInt(session.user.id);
+  const userTasks = await db
+    .select()
+    .from(tasks)
+    .where(eq(tasks.userId, userId))
+    .orderBy(desc(tasks.priorityScore));
+
+  return <TaskListClient initialTasks={userTasks} />;
+}
