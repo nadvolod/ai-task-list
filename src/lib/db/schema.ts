@@ -36,7 +36,7 @@ export const tasks = pgTable('tasks', {
 
 export const taskEvents = pgTable('task_events', {
   id: serial('id').primaryKey(),
-  taskId: integer('task_id').notNull().references(() => tasks.id),
+  taskId: integer('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   eventType: text('event_type').notNull(), // voice_note | image_extract | manual_edit
   rawInput: text('raw_input'),
   parsedOutput: jsonb('parsed_output'),

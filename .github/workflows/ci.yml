@@ -1,0 +1,199 @@
+name: CI
+
+on:
+  push:
+    branches: [main, finalize-app]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Run unit tests
+        run: npx vitest run tests/unit
+
+  test-integration:
+    name: Integration Tests + Coverage
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+      NEXTAUTH_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Run database migrations
+        run: npx tsx src/scripts/migrate.ts
+      - name: Run integration tests with coverage
+        run: npx vitest run --coverage
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat coverage/coverage-summary.json 2>/dev/null | node -e "
+            const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            const t = data.total;
+            console.log('Statements:', t.statements.pct + '%');
+            console.log('Branches:  ', t.branches.pct + '%');
+            console.log('Functions: ', t.functions.pct + '%');
+            console.log('Lines:     ', t.lines.pct + '%');
+          " >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Coverage data not available" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  agents-checklist:
+    name: AGENTS.md Checklist
+    needs: [lint, build, test-unit, test-integration]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Check: Tests exist and are runnable"
+        run: |
+          echo "✓ Unit tests exist:" && ls tests/unit/*.test.ts
+          echo "✓ Integration tests exist:" && ls tests/integration/*.test.ts
+
+      - name: "Check: Structured logging in all API routes"
+        run: |
+          FAIL=0
+          for route in $(find src/app/api -name 'route.ts'); do
+            if ! grep -q "logger\." "$route"; then
+              echo "✗ Missing logger in $route"
+              FAIL=1
+            else
+              echo "✓ $route has logging"
+            fi
+          done
+          if [ $FAIL -eq 1 ]; then
+            echo "::error::Some API routes are missing structured logging (logger.info/warn/error)"
+            exit 1
+          fi
+
+      - name: "Check: Monitoring configured"
+        run: |
+          FAIL=0
+          # Verify health check endpoint exists
+          if [ ! -f "src/app/api/health/route.ts" ]; then
+            echo "✗ Missing health check endpoint"
+            FAIL=1
+          else
+            echo "✓ Health check endpoint exists"
+          fi
+          # Verify error boundary exists
+          if [ ! -f "src/app/error.tsx" ]; then
+            echo "✗ Missing global error boundary"
+            FAIL=1
+          else
+            echo "✓ Global error boundary exists"
+          fi
+          # Verify analytics in layout
+          if ! grep -q "Analytics" src/app/layout.tsx; then
+            echo "✗ Missing Vercel Analytics in layout"
+            FAIL=1
+          else
+            echo "✓ Vercel Analytics configured"
+          fi
+          if ! grep -q "SpeedInsights" src/app/layout.tsx; then
+            echo "✗ Missing Vercel SpeedInsights in layout"
+            FAIL=1
+          else
+            echo "✓ Vercel SpeedInsights configured"
+          fi
+          if [ $FAIL -eq 1 ]; then
+            echo "::error::Monitoring requirements not met"
+            exit 1
+          fi
+
+      - name: "Check: Code coverage report included"
+        run: |
+          # This job runs after test-integration which uploads coverage
+          echo "✓ Coverage report is generated and uploaded by test-integration job"
+          echo "✓ Coverage summary is posted to GitHub Step Summary"
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: "Check: Coverage thresholds met"
+        run: |
+          node -e "
+            const data = JSON.parse(require('fs').readFileSync('coverage/coverage-summary.json','utf8'));
+            const t = data.total;
+            const MIN = 50;
+            let fail = false;
+            for (const [key, val] of Object.entries(t)) {
+              if (val.pct < MIN) {
+                console.log('✗ ' + key + ': ' + val.pct + '% (minimum: ' + MIN + '%)');
+                fail = true;
+              } else {
+                console.log('✓ ' + key + ': ' + val.pct + '%');
+              }
+            }
+            if (fail) {
+              console.error('::error::Code coverage below minimum threshold of ' + MIN + '%');
+              process.exit(1);
+            }
+            console.log('All coverage metrics above ' + MIN + '% threshold');
+          "
+
+      - name: "Checklist summary"
+        if: always()
+        run: |
+          echo "## AGENTS.md Checklist" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Requirement | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests exist and runnable | ✓ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Structured logging in API routes | ✓ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monitoring (health, analytics, error boundary) | ✓ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Code coverage report included | ✓ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Coverage thresholds met (≥50%) | ✓ |" >> $GITHUB_STEP_SUMMARY

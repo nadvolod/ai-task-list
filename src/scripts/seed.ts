@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 import { neon } from '@neondatabase/serverless';
 import bcrypt from 'bcryptjs';
 
@@ -10,7 +12,7 @@ async function seed() {
   const [user] = await sql`
     INSERT INTO users (email, password_hash)
     VALUES ('demo@example.com', ${passwordHash})
-    ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+    ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
     RETURNING id
   `;
 

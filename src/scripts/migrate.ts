@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 import { neon } from '@neondatabase/serverless';
 
 // Run the database migration by creating tables if they don't exist
@@ -48,12 +50,28 @@ async function migrate() {
   await sql`
     CREATE TABLE IF NOT EXISTS task_events (
       id SERIAL PRIMARY KEY,
-      task_id INTEGER NOT NULL REFERENCES tasks(id),
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       event_type TEXT NOT NULL,
       raw_input TEXT,
       parsed_output JSONB,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL
     )
+  `;
+
+  // Migration: update existing FK to add ON DELETE CASCADE
+  await sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'task_events_task_id_tasks_id_fk'
+        AND table_name = 'task_events'
+      ) THEN
+        ALTER TABLE task_events DROP CONSTRAINT task_events_task_id_tasks_id_fk;
+        ALTER TABLE task_events ADD CONSTRAINT task_events_task_id_tasks_id_fk
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE;
+      END IF;
+    END $$
   `;
 
   console.log('Migration complete!');
