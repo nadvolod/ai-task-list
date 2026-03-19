@@ -81,6 +81,19 @@ export interface VoiceParsedMetadata {
 }
 
 /**
+ * Transcribe audio using Whisper. Standalone helper reused by voice notes and voice commands.
+ */
+export async function transcribeAudio(audioBuffer: Buffer, filename: string): Promise<string> {
+  const client = getClient();
+  const transcription = await client.audio.transcriptions.create({
+    model: 'whisper-1',
+    file: new File([new Uint8Array(audioBuffer)], filename, { type: 'audio/webm' }),
+    response_format: 'text',
+  });
+  return typeof transcription === 'string' ? transcription : (transcription as { text: string }).text;
+}
+
+/**
  * Transcribe audio using Whisper and then parse it into structured task metadata.
  */
 export async function transcribeAndParseVoice(
@@ -90,16 +103,9 @@ export async function transcribeAndParseVoice(
 ): Promise<{ transcription: string; metadata: VoiceParsedMetadata }> {
   const client = getClient();
 
-  // Step 1: Transcribe audio using Whisper
-  const transcription = await client.audio.transcriptions.create({
-    model: 'whisper-1',
-    file: new File([new Uint8Array(audioBuffer)], filename, { type: 'audio/webm' }),
-    response_format: 'text',
-  });
+  const text = await transcribeAudio(audioBuffer, filename);
 
-  const text = typeof transcription === 'string' ? transcription : (transcription as { text: string }).text;
-
-  // Step 2: Parse transcription into structured metadata
+  // Parse transcription into structured metadata
   const parseResponse = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     max_tokens: 300,
@@ -143,4 +149,139 @@ Interpret context clues:
   }
 
   return { transcription: text, metadata };
+}
+
+// --- Voice Command Types ---
+
+export interface VoiceCommandAction {
+  type: 'add_task' | 'update_task' | 'mark_done' | 'mark_undone' | 'reprioritize' | 'delete_task' | 'query';
+  taskId?: number;
+  taskTitle?: string;
+  fields?: {
+    title?: string;
+    description?: string;
+    monetaryValue?: number;
+    revenuePotential?: number;
+    urgency?: number;
+    strategicValue?: number;
+  };
+  queryResponse?: string;
+  confidence: number;
+}
+
+export interface VoiceCommandResult {
+  transcription: string;
+  actions: VoiceCommandAction[];
+  summary: string;
+}
+
+export interface TaskContext {
+  id: number;
+  title: string;
+  status: string;
+  priorityScore: number;
+  monetaryValue: number | null;
+  revenuePotential: number | null;
+  urgency: number | null;
+  strategicValue: number | null;
+}
+
+/**
+ * Parse a voice command transcription against the user's task list.
+ * Uses GPT-4o for multi-intent reasoning and fuzzy task name matching.
+ */
+export async function parseVoiceCommand(
+  transcription: string,
+  currentTasks: TaskContext[]
+): Promise<VoiceCommandResult> {
+  const client = getClient();
+
+  // Cap task list context to 50 tasks
+  const taskContext = currentTasks.slice(0, 50).map(t => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    priorityScore: Math.round(t.priorityScore),
+    monetaryValue: t.monetaryValue,
+    urgency: t.urgency,
+  }));
+
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o',
+    max_tokens: 1000,
+    temperature: 0.2,
+    messages: [
+      {
+        role: 'system',
+        content: `You are a task management voice assistant. The user speaks commands about their tasks. Parse the command into structured actions.
+
+The user's current task list:
+${JSON.stringify(taskContext, null, 2)}
+
+Return ONLY valid JSON with this structure:
+{
+  "actions": [
+    {
+      "type": "add_task" | "update_task" | "mark_done" | "mark_undone" | "reprioritize" | "delete_task" | "query",
+      "taskId": number (required for existing task actions, match by fuzzy title),
+      "taskTitle": "string (the task title for add_task, or matched title for context)",
+      "fields": {
+        "title": "string (for add_task)",
+        "description": "string (optional notes)",
+        "monetaryValue": number (optional, dollars),
+        "revenuePotential": number (optional, dollars),
+        "urgency": number (optional, 1-10),
+        "strategicValue": number (optional, 1-10)
+      },
+      "queryResponse": "string (natural language answer for query type)",
+      "confidence": number (0-1, how confident you are in matching the intent/task)
+    }
+  ],
+  "summary": "Brief human-readable description of what was understood"
+}
+
+Rules:
+- Support multiple actions in one command ("add X and mark Y as done")
+- For existing tasks, match by fuzzy title and return the taskId from the list
+- "mark done" / "complete" / "finish" → mark_done
+- "undo" / "reopen" / "mark not done" → mark_undone
+- "add" / "create" / "new task" → add_task with fields.title
+- "reprioritize" / "make higher/lower priority" / "it's worth $X" → reprioritize with fields
+- "delete" / "remove" → delete_task
+- Questions ("what's my top task?", "how many tasks?") → query with queryResponse
+- If urgency is mentioned ("urgent", "ASAP") set fields.urgency to 8-9
+- If money is mentioned ("worth $5000") set fields.monetaryValue
+- If no task matches, still return the action with confidence < 0.5 and a reasonable taskTitle
+- Always set confidence based on how sure you are about the match`,
+      },
+      {
+        role: 'user',
+        content: transcription,
+      },
+    ],
+  });
+
+  const content = response.choices[0]?.message?.content ?? '{}';
+
+  let parsed: { actions?: VoiceCommandAction[]; summary?: string };
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        parsed = {};
+      }
+    } else {
+      parsed = {};
+    }
+  }
+
+  return {
+    transcription,
+    actions: parsed.actions ?? [],
+    summary: parsed.summary ?? 'Could not understand the command.',
+  };
 }

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { signOut } from 'next-auth/react';
 import Link from 'next/link';
+import VoiceCommandButton from './VoiceCommandButton';
 
 interface Task {
   id: number;
@@ -48,6 +49,14 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     }
     setLoading(null);
   }
+
+  const refreshTasks = useCallback(async () => {
+    const res = await fetch('/api/tasks');
+    if (res.ok) {
+      const data = await res.json();
+      setTasks(data);
+    }
+  }, []);
 
   const pending = tasks.filter(t => t.status === 'todo');
   const done = tasks.filter(t => t.status === 'done');
@@ -202,6 +211,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
           </div>
         )}
       </div>
+
+      <VoiceCommandButton onTasksChanged={refreshTasks} />
     </main>
   );
 }
