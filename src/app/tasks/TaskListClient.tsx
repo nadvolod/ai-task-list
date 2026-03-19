@@ -60,6 +60,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
           {/* Checkbox */}
           <button
             onClick={() => toggleDone(task)}
+            aria-label={`Mark "${task.title}" as ${task.status === 'done' ? 'not done' : 'done'}`}
             className={`mt-0.5 w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
               task.status === 'done'
                 ? 'bg-green-500 border-green-500'

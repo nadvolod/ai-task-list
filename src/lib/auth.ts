@@ -19,7 +19,7 @@ export const authOptions: NextAuthOptions = {
         const [user] = await db
           .select()
           .from(users)
-          .where(eq(users.email, credentials.email.toLowerCase()))
+          .where(eq(users.email, credentials.email.toLowerCase().trim()))
           .limit(1);
 
         if (!user) return null;

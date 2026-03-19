@@ -4,52 +4,87 @@ import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
-import { calculatePriority } from '@/lib/priority';
+import { calculatePriorityAI } from '@/lib/priority';
+import { logger } from '@/lib/logger';
 
 export async function GET(_req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const userId = parseInt(session.user.id);
-  const userTasks = await db
-    .select()
-    .from(tasks)
-    .where(eq(tasks.userId, userId))
-    .orderBy(desc(tasks.priorityScore));
+    const userId = parseInt(session.user.id);
+    logger.info('GET /api/tasks', { userId });
 
-  return NextResponse.json(userTasks);
+    const userTasks = await db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.userId, userId))
+      .orderBy(desc(tasks.priorityScore));
+
+    return NextResponse.json(userTasks);
+  } catch (err) {
+    logger.error('GET /api/tasks failed', { error: (err as Error).message });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const userId = parseInt(session.user.id);
-  const body = await req.json();
+    const userId = parseInt(session.user.id);
+    const body = await req.json();
 
-  const { score, reason } = calculatePriority({
-    monetaryValue: body.monetaryValue,
-    revenuePotential: body.revenuePotential,
-    urgency: body.urgency,
-    strategicValue: body.strategicValue,
-  });
+    // Input validation
+    if (!body.title || typeof body.title !== 'string' || body.title.trim().length === 0) {
+      return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
+    if (body.monetaryValue != null && (typeof body.monetaryValue !== 'number' || body.monetaryValue < 0)) {
+      return NextResponse.json({ error: 'monetaryValue must be a non-negative number' }, { status: 400 });
+    }
+    if (body.revenuePotential != null && (typeof body.revenuePotential !== 'number' || body.revenuePotential < 0)) {
+      return NextResponse.json({ error: 'revenuePotential must be a non-negative number' }, { status: 400 });
+    }
+    if (body.urgency != null && (typeof body.urgency !== 'number' || body.urgency < 1 || body.urgency > 10)) {
+      return NextResponse.json({ error: 'urgency must be between 1 and 10' }, { status: 400 });
+    }
+    if (body.strategicValue != null && (typeof body.strategicValue !== 'number' || body.strategicValue < 1 || body.strategicValue > 10)) {
+      return NextResponse.json({ error: 'strategicValue must be between 1 and 10' }, { status: 400 });
+    }
 
-  const [task] = await db
-    .insert(tasks)
-    .values({
-      userId,
+    logger.info('POST /api/tasks', { userId, title: body.title });
+
+    const { score, reason } = await calculatePriorityAI({
       title: body.title,
       description: body.description,
-      sourceType: body.sourceType ?? 'manual',
       monetaryValue: body.monetaryValue,
       revenuePotential: body.revenuePotential,
       urgency: body.urgency,
       strategicValue: body.strategicValue,
-      confidence: body.confidence,
-      priorityScore: score,
-      priorityReason: reason,
-    })
-    .returning();
+    });
 
-  return NextResponse.json(task, { status: 201 });
+    const [task] = await db
+      .insert(tasks)
+      .values({
+        userId,
+        title: body.title.trim(),
+        description: body.description,
+        sourceType: body.sourceType ?? 'manual',
+        monetaryValue: body.monetaryValue,
+        revenuePotential: body.revenuePotential,
+        urgency: body.urgency,
+        strategicValue: body.strategicValue,
+        confidence: body.confidence,
+        priorityScore: score,
+        priorityReason: reason,
+      })
+      .returning();
+
+    logger.info('Task created', { taskId: task.id, userId, score });
+    return NextResponse.json(task, { status: 201 });
+  } catch (err) {
+    logger.error('POST /api/tasks failed', { error: (err as Error).message });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

@@ -5,80 +5,88 @@ import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { transcribeAndParseVoice } from '@/lib/ai';
-import { calculatePriority } from '@/lib/priority';
+import { calculatePriorityAI } from '@/lib/priority';
+import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const userId = parseInt(session.user.id);
-  const { id } = await params;
-  const taskId = parseInt(id);
+    const userId = parseInt(session.user.id);
+    const { id } = await params;
+    const taskId = parseInt(id);
+    if (isNaN(taskId)) return NextResponse.json({ error: 'Invalid task ID' }, { status: 400 });
 
-  // Verify task ownership
-  const [task] = await db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)))
-    .limit(1);
+    logger.info('POST /api/tasks/:id/voice', { userId, taskId });
 
-  if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const [task] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)))
+      .limit(1);
 
-  const formData = await req.formData();
-  const audioFile = formData.get('audio') as File | null;
+    if (!task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  if (!audioFile) return NextResponse.json({ error: 'No audio file' }, { status: 400 });
+    const formData = await req.formData();
+    const audioFile = formData.get('audio') as File | null;
+    if (!audioFile) return NextResponse.json({ error: 'No audio file' }, { status: 400 });
 
-  const arrayBuffer = await audioFile.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-  // Transcribe and parse voice note
-  const { transcription, metadata } = await transcribeAndParseVoice(buffer, audioFile.name || 'audio.webm', task.title);
+    const { transcription, metadata } = await transcribeAndParseVoice(buffer, audioFile.name || 'audio.webm', task.title);
+    logger.info('Voice transcribed', { taskId, transcription: transcription.substring(0, 100) });
 
-  // Store the event
-  await db.insert(taskEvents).values({
-    taskId,
-    eventType: 'voice_note',
-    rawInput: transcription,
-    parsedOutput: metadata,
-  });
+    await db.insert(taskEvents).values({
+      taskId,
+      eventType: 'voice_note',
+      rawInput: transcription,
+      parsedOutput: metadata,
+    });
 
-  // Merge new metadata with existing task data (keep highest values)
-  const newMonetary = Math.max(task.monetaryValue ?? 0, metadata.monetary_value ?? 0) || null;
-  const newRevenue = Math.max(task.revenuePotential ?? 0, metadata.revenue_potential ?? 0) || null;
-  const newUrgency = Math.max(task.urgency ?? 0, metadata.urgency ?? 0) || null;
-  const newStrategic = Math.max(task.strategicValue ?? 0, metadata.strategic_value ?? 0) || null;
+    // Use voice values if provided, otherwise keep existing
+    const newMonetary = metadata.monetary_value !== undefined && metadata.monetary_value !== null
+      ? metadata.monetary_value : task.monetaryValue;
+    const newRevenue = metadata.revenue_potential !== undefined && metadata.revenue_potential !== null
+      ? metadata.revenue_potential : task.revenuePotential;
+    const newUrgency = metadata.urgency !== undefined && metadata.urgency !== null
+      ? metadata.urgency : task.urgency;
+    const newStrategic = metadata.strategic_value !== undefined && metadata.strategic_value !== null
+      ? metadata.strategic_value : task.strategicValue;
 
-  // Recalculate priority
-  const { score, reason } = calculatePriority({
-    monetaryValue: newMonetary,
-    revenuePotential: newRevenue,
-    urgency: newUrgency,
-    strategicValue: newStrategic,
-  });
-
-  const notes = task.description
-    ? `${task.description}\n\nVoice note: ${transcription}`
-    : `Voice note: ${transcription}`;
-
-  const [updated] = await db
-    .update(tasks)
-    .set({
+    const { score, reason } = await calculatePriorityAI({
+      title: task.title,
+      description: task.description,
       monetaryValue: newMonetary,
       revenuePotential: newRevenue,
       urgency: newUrgency,
       strategicValue: newStrategic,
-      description: notes,
-      priorityScore: score,
-      priorityReason: reason,
-      updatedAt: new Date(),
-    })
-    .where(eq(tasks.id, taskId))
-    .returning();
+    });
 
-  return NextResponse.json({
-    task: updated,
-    transcription,
-    metadata,
-  });
+    const notes = task.description
+      ? `${task.description}\n\nVoice note: ${transcription}`
+      : `Voice note: ${transcription}`;
+
+    const [updated] = await db
+      .update(tasks)
+      .set({
+        monetaryValue: newMonetary,
+        revenuePotential: newRevenue,
+        urgency: newUrgency,
+        strategicValue: newStrategic,
+        description: notes,
+        priorityScore: score,
+        priorityReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, taskId))
+      .returning();
+
+    logger.info('Task updated via voice', { taskId, score });
+    return NextResponse.json({ task: updated, transcription, metadata });
+  } catch (err) {
+    logger.error('POST /api/tasks/:id/voice failed', { error: (err as Error).message });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

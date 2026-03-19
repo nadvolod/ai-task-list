@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 import { neon } from '@neondatabase/serverless';
 
 // Run the database migration by creating tables if they don't exist
