@@ -16,30 +16,30 @@ beforeAll(async () => {
 
   // Create some test tasks for the voice command to reference
   const db = getTestDb();
-  const [task1] = await db.insert(schema.tasks).values({
+  await db.insert(schema.tasks).values({
     userId: testUserId,
     title: 'Buy groceries from the store',
     sourceType: 'manual',
     priorityScore: 25,
     urgency: 3,
-  }).returning();
+  });
 
-  const [task2] = await db.insert(schema.tasks).values({
+  await db.insert(schema.tasks).values({
     userId: testUserId,
     title: 'Send invoice to client for $5000',
     sourceType: 'manual',
     priorityScore: 70,
     monetaryValue: 5000,
     urgency: 8,
-  }).returning();
+  });
 
-  const [task3] = await db.insert(schema.tasks).values({
+  await db.insert(schema.tasks).values({
     userId: testUserId,
     title: 'Schedule dentist appointment',
     sourceType: 'manual',
     priorityScore: 15,
     urgency: 2,
-  }).returning();
+  });
 
 });
 

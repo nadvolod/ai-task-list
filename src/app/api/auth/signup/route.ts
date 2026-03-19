@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,19 +14,22 @@ export async function POST(req: NextRequest) {
     }
 
     const normalized = email.toLowerCase().trim();
+    logger.info('POST /api/auth/signup', { email: normalized });
 
     // Check if user already exists
     const [existing] = await db.select().from(users).where(eq(users.email, normalized)).limit(1);
     if (existing) {
+      logger.warn('Signup attempt with existing email', { email: normalized });
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
     const [user] = await db.insert(users).values({ email: normalized, passwordHash }).returning();
 
+    logger.info('User created', { userId: user.id, email: user.email });
     return NextResponse.json({ id: user.id, email: user.email });
   } catch (err) {
-    console.error('Signup error:', err);
+    logger.error('POST /api/auth/signup failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }

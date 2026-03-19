@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
   const checks: Record<string, string> = {};
@@ -12,9 +13,12 @@ export async function GET() {
   } catch (err) {
     checks.database = `error: ${(err as Error).message}`;
     healthy = false;
+    logger.error('Health check: database failed', { error: (err as Error).message });
   }
 
   checks.openai = process.env.OPENAI_API_KEY ? 'configured' : 'missing';
+
+  logger.info('GET /api/health', { status: healthy ? 'healthy' : 'degraded' });
 
   return NextResponse.json(
     {
