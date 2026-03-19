@@ -1,23 +1,27 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { users } from '@/lib/db/schema';
 import { sql } from 'drizzle-orm';
 
 export async function GET() {
   const checks: Record<string, string> = {};
+  let healthy = true;
 
   try {
-    const result = await db.select({ count: sql<number>`count(*)` }).from(users);
-    checks.database = `ok (${result[0].count} users)`;
+    await db.execute(sql`SELECT 1`);
+    checks.database = 'ok';
   } catch (err) {
     checks.database = `error: ${(err as Error).message}`;
+    healthy = false;
   }
 
   checks.openai = process.env.OPENAI_API_KEY ? 'configured' : 'missing';
 
-  return NextResponse.json({
-    status: checks.database.startsWith('ok') ? 'healthy' : 'degraded',
-    timestamp: new Date().toISOString(),
-    checks,
-  });
+  return NextResponse.json(
+    {
+      status: healthy ? 'healthy' : 'degraded',
+      timestamp: new Date().toISOString(),
+      checks,
+    },
+    { status: healthy ? 200 : 503 },
+  );
 }

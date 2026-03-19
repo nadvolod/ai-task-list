@@ -9,6 +9,8 @@ import { logger } from '@/lib/logger';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_TASKS_PER_UPLOAD = 50;
+const AI_SCORING_CONCURRENCY = 5;
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,27 +39,36 @@ export async function POST(req: NextRequest) {
     const mimeType = file.type || 'image/jpeg';
 
     const { tasks: extractedTasks, rawText } = await extractTasksFromImage(base64, mimeType);
-    logger.info('Tasks extracted from image', { userId, count: extractedTasks.length });
+    const cappedTasks = extractedTasks.slice(0, MAX_TASKS_PER_UPLOAD);
+    if (extractedTasks.length > MAX_TASKS_PER_UPLOAD) {
+      logger.warn('Extracted tasks capped', { userId, extracted: extractedTasks.length, cap: MAX_TASKS_PER_UPLOAD });
+    }
+    logger.info('Tasks extracted from image', { userId, count: cappedTasks.length });
 
     const [upload] = await db
       .insert(uploads)
       .values({ userId, extractedText: rawText })
       .returning();
 
-    // Score all tasks via AI and batch insert
-    const taskValues = await Promise.all(
-      extractedTasks.map(async (item) => {
-        const { score, reason } = await calculatePriorityAI({ title: item.title });
-        return {
-          userId,
-          title: item.title,
-          sourceType: 'image_upload' as const,
-          confidence: item.confidence,
-          priorityScore: score,
-          priorityReason: reason,
-        };
-      })
-    );
+    // Score tasks via AI with concurrency limit
+    const taskValues = [];
+    for (let i = 0; i < cappedTasks.length; i += AI_SCORING_CONCURRENCY) {
+      const batch = cappedTasks.slice(i, i + AI_SCORING_CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async (item) => {
+          const { score, reason } = await calculatePriorityAI({ title: item.title });
+          return {
+            userId,
+            title: item.title,
+            sourceType: 'image_upload' as const,
+            confidence: item.confidence,
+            priorityScore: score,
+            priorityReason: reason,
+          };
+        })
+      );
+      taskValues.push(...results);
+    }
 
     const createdTasks = taskValues.length > 0
       ? await db.insert(tasks).values(taskValues).returning()

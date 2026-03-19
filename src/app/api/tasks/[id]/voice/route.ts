@@ -45,15 +45,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       parsedOutput: metadata,
     });
 
-    // Use voice values if provided, otherwise keep existing
-    const newMonetary = metadata.monetary_value !== undefined && metadata.monetary_value !== null
-      ? metadata.monetary_value : task.monetaryValue;
-    const newRevenue = metadata.revenue_potential !== undefined && metadata.revenue_potential !== null
-      ? metadata.revenue_potential : task.revenuePotential;
-    const newUrgency = metadata.urgency !== undefined && metadata.urgency !== null
-      ? metadata.urgency : task.urgency;
-    const newStrategic = metadata.strategic_value !== undefined && metadata.strategic_value !== null
-      ? metadata.strategic_value : task.strategicValue;
+    // Validate and clamp voice metadata before using
+    const clampPositive = (v: unknown): number | null => {
+      if (v === undefined || v === null || typeof v !== 'number' || isNaN(v)) return null;
+      return Math.max(v, 0);
+    };
+    const clamp1to10 = (v: unknown): number | null => {
+      if (v === undefined || v === null || typeof v !== 'number' || isNaN(v)) return null;
+      return Math.max(1, Math.min(10, Math.round(v)));
+    };
+
+    const parsedMonetary = clampPositive(metadata.monetary_value);
+    const parsedRevenue = clampPositive(metadata.revenue_potential);
+    const parsedUrgency = clamp1to10(metadata.urgency);
+    const parsedStrategic = clamp1to10(metadata.strategic_value);
+
+    // Use voice values if valid, otherwise keep existing
+    const newMonetary = parsedMonetary !== null ? parsedMonetary : task.monetaryValue;
+    const newRevenue = parsedRevenue !== null ? parsedRevenue : task.revenuePotential;
+    const newUrgency = parsedUrgency !== null ? parsedUrgency : task.urgency;
+    const newStrategic = parsedStrategic !== null ? parsedStrategic : task.strategicValue;
 
     const { score, reason } = await calculatePriorityAI({
       title: task.title,
@@ -64,9 +75,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       strategicValue: newStrategic,
     });
 
-    const notes = task.description
-      ? `${task.description}\n\nVoice note: ${transcription}`
-      : `Voice note: ${transcription}`;
+    // Cap description length to prevent unbounded growth from multiple voice notes
+    const MAX_DESCRIPTION_LENGTH = 2000;
+    const voiceAppend = `Voice note: ${transcription}`;
+    let notes: string;
+    if (!task.description) {
+      notes = voiceAppend;
+    } else if (task.description.length + voiceAppend.length + 2 > MAX_DESCRIPTION_LENGTH) {
+      notes = task.description; // Don't append if it would exceed cap
+    } else {
+      notes = `${task.description}\n\n${voiceAppend}`;
+    }
 
     const [updated] = await db
       .update(tasks)
@@ -80,7 +99,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         priorityReason: reason,
         updatedAt: new Date(),
       })
-      .where(eq(tasks.id, taskId))
+      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)))
       .returning();
 
     logger.info('Task updated via voice', { taskId, score });

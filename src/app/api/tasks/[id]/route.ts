@@ -21,6 +21,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const body = await req.json();
 
+    // Validate fields if provided
+    if (body.title !== undefined && (typeof body.title !== 'string' || body.title.trim().length === 0)) {
+      return NextResponse.json({ error: 'Title cannot be empty' }, { status: 400 });
+    }
+    if (body.monetaryValue !== undefined && body.monetaryValue !== null && (typeof body.monetaryValue !== 'number' || body.monetaryValue < 0)) {
+      return NextResponse.json({ error: 'monetaryValue must be a non-negative number' }, { status: 400 });
+    }
+    if (body.revenuePotential !== undefined && body.revenuePotential !== null && (typeof body.revenuePotential !== 'number' || body.revenuePotential < 0)) {
+      return NextResponse.json({ error: 'revenuePotential must be a non-negative number' }, { status: 400 });
+    }
+    if (body.urgency !== undefined && body.urgency !== null && (typeof body.urgency !== 'number' || body.urgency < 1 || body.urgency > 10)) {
+      return NextResponse.json({ error: 'urgency must be between 1 and 10' }, { status: 400 });
+    }
+    if (body.strategicValue !== undefined && body.strategicValue !== null && (typeof body.strategicValue !== 'number' || body.strategicValue < 1 || body.strategicValue > 10)) {
+      return NextResponse.json({ error: 'strategicValue must be between 1 and 10' }, { status: 400 });
+    }
+    if (body.status !== undefined && !['todo', 'done'].includes(body.status)) {
+      return NextResponse.json({ error: 'status must be "todo" or "done"' }, { status: 400 });
+    }
+
     const [current] = await db
       .select()
       .from(tasks)

@@ -25,19 +25,27 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
   async function toggleDone(task: Task) {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
+    const prevTasks = tasks;
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
-    await fetch(`/api/tasks/${task.id}`, {
+    const res = await fetch(`/api/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),
     });
+    if (!res.ok) {
+      setTasks(prevTasks);
+    }
   }
 
   async function deleteTask(id: number) {
     if (!confirm('Delete this task?')) return;
     setLoading(id);
+    const prevTasks = tasks;
     setTasks(prev => prev.filter(t => t.id !== id));
-    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      setTasks(prevTasks);
+    }
     setLoading(null);
   }
 

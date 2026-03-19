@@ -16,6 +16,7 @@ export default function UploadPage() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+    if (preview) URL.revokeObjectURL(preview);
     setFile(f);
     setPreview(URL.createObjectURL(f));
     setResult(null);
@@ -23,6 +24,7 @@ export default function UploadPage() {
   }
 
   function handleClearPreview() {
+    if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
     setFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';

@@ -60,8 +60,12 @@ Rules:
     // Fallback: try to extract JSON from the response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return { tasks: parsed.tasks ?? [], rawText: parsed.raw_text ?? '' };
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return { tasks: parsed.tasks ?? [], rawText: parsed.raw_text ?? '' };
+      } catch {
+        return { tasks: [], rawText: content };
+      }
     }
     return { tasks: [], rawText: content };
   }
