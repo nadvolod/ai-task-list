@@ -14,10 +14,13 @@ export async function GET() {
   } catch (err) {
     checks.database = `error: ${(err as Error).message}`;
     healthy = false;
+    logger.error('Health check: database failed', { error: (err as Error).message });
   }
 
   checks.openai = process.env.OPENAI_API_KEY ? 'configured' : 'missing';
   checks.google_api = process.env.GOOGLE_API_KEY ? 'configured' : 'missing';
+
+  logger.info('GET /api/health', { status: healthy ? 'healthy' : 'degraded' });
 
   return NextResponse.json(
     {
