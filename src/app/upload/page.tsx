@@ -141,7 +141,7 @@ export default function UploadPage() {
         </div>
 
         <p className="text-xs text-gray-400 text-center px-4">
-          The image is sent to OpenAI&apos;s vision API to extract task text. Extracted tasks are saved to your account.
+          The image is sent to Google&apos;s Gemini AI to extract task text. Extracted tasks are saved to your account.
         </p>
       </div>
     </main>

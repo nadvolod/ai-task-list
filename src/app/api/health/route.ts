@@ -17,6 +17,7 @@ export async function GET() {
   }
 
   checks.openai = process.env.OPENAI_API_KEY ? 'configured' : 'missing';
+  checks.google_api = process.env.GOOGLE_API_KEY ? 'configured' : 'missing';
 
   return NextResponse.json(
     {

@@ -2,7 +2,28 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { NextRequest } from 'next/server';
 import { createTestUser, cleanupTestUser, mockSession, mockNoSession } from '../helpers/db';
 
-// Mock OpenAI for both image extraction and priority scoring
+// Mock Google Generative AI for image extraction
+vi.mock('@google/generative-ai', () => ({
+  GoogleGenerativeAI: class {
+    getGenerativeModel() {
+      return {
+        generateContent: vi.fn().mockResolvedValue({
+          response: {
+            text: () => JSON.stringify({
+              raw_text: 'Buy groceries\nCall dentist',
+              tasks: [
+                { title: 'Buy groceries', confidence: 0.95 },
+                { title: 'Call dentist', confidence: 0.88 },
+              ],
+            }),
+          },
+        }),
+      };
+    }
+  },
+}));
+
+// Mock OpenAI for priority scoring (still uses GPT-4o-mini)
 vi.mock('openai', () => ({
   default: class {
     chat = {
@@ -10,15 +31,7 @@ vi.mock('openai', () => ({
         create: vi.fn().mockResolvedValue({
           choices: [{
             message: {
-              content: JSON.stringify({
-                raw_text: 'Buy groceries\nCall dentist',
-                tasks: [
-                  { title: 'Buy groceries', confidence: 0.95 },
-                  { title: 'Call dentist', confidence: 0.88 },
-                ],
-                score: 30,
-                reason: 'Test priority',
-              }),
+              content: JSON.stringify({ score: 30, reason: 'Test priority' }),
             },
           }],
         }),

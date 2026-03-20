@@ -1,34 +1,36 @@
 import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Initialize OpenAI client (lazy, so server-side only)
 function getClient() {
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
+// Initialize Google Gemini client (lazy, for image extraction)
+function getGeminiClient() {
+  return new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+}
+
 /**
- * Extract task list items from an image using GPT-4o vision.
+ * Extract task list items from an image using Google Gemini vision.
  * Returns an array of task strings.
  */
 export async function extractTasksFromImage(
   base64Image: string,
   mimeType: string
 ): Promise<{ tasks: Array<{ title: string; confidence: number }>; rawText: string }> {
-  const client = getClient();
+  const gemini = getGeminiClient();
+  const model = gemini.getGenerativeModel({ model: 'gemini-2.5-pro-preview-06-05' });
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 1000,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mimeType};base64,${base64Image}` },
-          },
-          {
-            type: 'text',
-            text: `Extract the to-do list items from this image. Return ONLY a JSON object with this exact structure:
+  const result = await model.generateContent([
+    {
+      inlineData: {
+        mimeType,
+        data: base64Image,
+      },
+    },
+    {
+      text: `Extract the to-do list items from this image. Return ONLY a JSON object with this exact structure:
 {
   "raw_text": "the full extracted text",
   "tasks": [
@@ -42,13 +44,10 @@ Rules:
 - Do not add tasks that are not in the image.
 - Set confidence between 0.5 and 1.0. Use lower confidence if the text is hard to read.
 - Return valid JSON only, no markdown.`,
-          },
-        ],
-      },
-    ],
-  });
+    },
+  ]);
 
-  const content = response.choices[0]?.message?.content ?? '{"raw_text":"","tasks":[]}';
+  const content = result.response.text() ?? '{"raw_text":"","tasks":[]}';
 
   try {
     const parsed = JSON.parse(content);
