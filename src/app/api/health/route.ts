@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
+import { logger } from '@/lib/logger';
 
 export async function GET() {
+  logger.info('GET /api/health');
   const checks: Record<string, string> = {};
   let healthy = true;
 
