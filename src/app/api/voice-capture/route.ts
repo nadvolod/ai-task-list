@@ -3,8 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 import { transcribeAndCreateTasks } from '@/lib/ai';
-import { calculatePriorityAI } from '@/lib/priority';
+import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest) {
@@ -46,16 +47,6 @@ export async function POST(req: NextRequest) {
       const urgency = typeof parsed.urgency === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.urgency))) : null;
       const strategicValue = typeof parsed.strategic_value === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.strategic_value))) : null;
 
-      const { score, reason } = await calculatePriorityAI({
-        title: parsed.title,
-        description: parsed.description,
-        monetaryValue,
-        revenuePotential,
-        urgency,
-        strategicValue,
-        dueDate,
-      });
-
       const [task] = await db
         .insert(tasks)
         .values({
@@ -68,8 +59,6 @@ export async function POST(req: NextRequest) {
           urgency,
           strategicValue,
           dueDate,
-          priorityScore: score,
-          priorityReason: reason,
         })
         .returning();
 
@@ -83,8 +72,20 @@ export async function POST(req: NextRequest) {
       createdTasks.push(task);
     }
 
-    logger.info('Voice tasks created', { userId, count: createdTasks.length });
-    return NextResponse.json({ tasks: createdTasks, transcription }, { status: 201 });
+    // Re-rank all tasks relative to each other
+    if (createdTasks.length > 0) {
+      await reprioritizeAllTasks(userId);
+    }
+
+    // Re-fetch to get updated scores
+    const updatedTasks = [];
+    for (const t of createdTasks) {
+      const [refreshed] = await db.select().from(tasks).where(eq(tasks.id, t.id));
+      updatedTasks.push(refreshed);
+    }
+
+    logger.info('Voice tasks created', { userId, count: updatedTasks.length });
+    return NextResponse.json({ tasks: updatedTasks, transcription }, { status: 201 });
   } catch (err) {
     logger.error('POST /api/voice-capture failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

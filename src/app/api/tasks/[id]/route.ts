@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { calculatePriorityAI } from '@/lib/priority';
+import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -68,17 +68,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const newStrategic = body.strategicValue !== undefined ? body.strategicValue : current.strategicValue;
     const newDueDate = parsedDueDate !== undefined ? parsedDueDate : current.dueDate;
 
-    const { score, reason } = await calculatePriorityAI({
-      title: newTitle,
-      description: newDescription,
-      monetaryValue: newMonetary,
-      revenuePotential: newRevenue,
-      urgency: newUrgency,
-      strategicValue: newStrategic,
-      dueDate: newDueDate,
-    });
-
-    const [updated] = await db
+    await db
       .update(tasks)
       .set({
         title: newTitle,
@@ -90,14 +80,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         strategicValue: newStrategic,
         manualOrder: body.manualOrder !== undefined ? body.manualOrder : current.manualOrder,
         dueDate: newDueDate,
-        priorityScore: score,
-        priorityReason: reason,
         updatedAt: new Date(),
       })
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)))
-      .returning();
+      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
 
-    logger.info('Task updated', { taskId, userId, score });
+    await reprioritizeAllTasks(userId);
+
+    // Re-fetch to get updated priority score
+    const [updated] = await db.select().from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
+
+    logger.info('Task updated', { taskId, userId, score: updated.priorityScore });
     return NextResponse.json(updated);
   } catch (err) {
     logger.error('PATCH /api/tasks/:id failed', { error: (err as Error).message });
@@ -118,6 +111,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     logger.info('DELETE /api/tasks/:id', { userId, taskId });
 
     await db.delete(tasks).where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
+
+    // Re-rank remaining tasks now that one is removed
+    await reprioritizeAllTasks(userId);
 
     logger.info('Task deleted', { taskId, userId });
     return NextResponse.json({ ok: true });

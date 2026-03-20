@@ -33,6 +33,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddTitle, setQuickAddTitle] = useState('');
   const [quickAddLoading, setQuickAddLoading] = useState(false);
+  const [focusRefreshKey, setFocusRefreshKey] = useState(0);
 
   async function toggleDone(task: Task) {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
@@ -45,6 +46,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     });
     if (!res.ok) {
       setTasks(prevTasks);
+    } else {
+      setFocusRefreshKey(k => k + 1);
     }
   }
 
@@ -270,7 +273,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
       <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
         {/* Focus Panel */}
-        <FocusPanel onToggleDone={handleToggleDoneById} />
+        <FocusPanel onToggleDone={handleToggleDoneById} refreshKey={focusRefreshKey} />
 
         {/* Inline quick-add */}
         {quickAddOpen ? (
@@ -308,6 +311,16 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
             >
               + Add task
             </button>
+            <Link
+              href="/upload"
+              className="bg-gray-100 text-gray-600 text-sm font-medium rounded-xl py-3 px-4 hover:bg-gray-200 transition-colors flex items-center"
+              title="Import from image"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </Link>
             <Link
               href="/tasks/new"
               className="bg-gray-100 text-gray-600 text-sm font-medium rounded-xl py-3 px-4 hover:bg-gray-200 transition-colors flex items-center"

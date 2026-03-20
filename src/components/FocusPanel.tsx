@@ -14,15 +14,17 @@ interface FocusTask {
 
 interface FocusPanelProps {
   onToggleDone: (taskId: number) => void;
+  refreshKey?: number;
 }
 
-export default function FocusPanel({ onToggleDone }: FocusPanelProps) {
+export default function FocusPanel({ onToggleDone, refreshKey = 0 }: FocusPanelProps) {
   const [focusTasks, setFocusTasks] = useState<FocusTask[]>([]);
   const [summary, setSummary] = useState('');
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
+    setLoading(true);
     fetch('/api/focus')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
@@ -32,7 +34,7 @@ export default function FocusPanel({ onToggleDone }: FocusPanelProps) {
         }
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshKey]);
 
   const greeting = (() => {
     const hour = new Date().getHours();

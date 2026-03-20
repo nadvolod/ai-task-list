@@ -1,4 +1,7 @@
 import OpenAI from 'openai';
+import { db } from '@/lib/db';
+import { tasks } from '@/lib/db/schema';
+import { eq, and } from 'drizzle-orm';
 
 export interface PriorityInput {
   title?: string;
@@ -16,131 +19,143 @@ export interface PriorityResult {
   reason: string;
 }
 
+const REPRIORITIZE_PROMPT = `You are a CEO's task prioritization engine. You will receive a JSON array of ALL the user's active tasks. Score each task 0-100 RELATIVE to the others in the list.
+
+RANKING PRINCIPLES:
+1. MONETARY VALUE is the primary factor. The task with the highest dollar amount (monetary_value or revenue_potential) should get the highest score. Spread scores proportionally — if one task is worth 75x more than another, that must be clearly reflected.
+2. URGENCY & DUE DATES are the tiebreaker. Among tasks with similar monetary value, overdue or imminent tasks rank higher.
+3. EFFORT is the final tiebreaker. Among tasks with similar value and urgency, quicker/easier tasks rank slightly higher (faster ROI).
+
+SCORING RULES:
+- Scores must be RELATIVE — spread them across the 0-100 range based on the current list
+- The most important task should score 90-100
+- The least important should score 10-30
+- Differentiate clearly: avoid giving similar scores to very different tasks
+- Today's date is {today}
+
+Return ONLY a JSON array: [{ "id": number, "score": number, "reason": "one sentence" }]`;
+
 /**
- * AI-based priority scoring using GPT-4o-mini.
- * Falls back to local calculation if AI is unavailable.
+ * Re-rank ALL active tasks for a user relative to each other.
+ * Sends the full task list to the AI in one prompt so scores reflect relative importance.
  */
-export async function calculatePriorityAI(input: PriorityInput): Promise<PriorityResult> {
+export async function reprioritizeAllTasks(userId: number): Promise<void> {
+  const allTasks = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.status, 'todo')));
+
+  if (allTasks.length === 0) return;
+
+  if (allTasks.length === 1) {
+    await db.update(tasks)
+      .set({ priorityScore: 50, priorityReason: 'Only active task.', updatedAt: new Date() })
+      .where(eq(tasks.id, allTasks[0].id));
+    return;
+  }
+
+  const taskList = allTasks.map(t => ({
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    monetary_value: t.monetaryValue,
+    revenue_potential: t.revenuePotential,
+    urgency: t.urgency,
+    strategic_value: t.strategicValue,
+    due_date: t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : null,
+  }));
+
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    let dueDateLine: string | null = null;
-    if (input.dueDate) {
-      const now = new Date();
-      const diffMs = new Date(input.dueDate).getTime() - now.getTime();
-      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-      if (diffDays < 0) dueDateLine = `Due date: ${new Date(input.dueDate).toISOString().split('T')[0]} (OVERDUE by ${Math.abs(diffDays)} days)`;
-      else if (diffDays === 0) dueDateLine = `Due date: ${new Date(input.dueDate).toISOString().split('T')[0]} (DUE TODAY)`;
-      else dueDateLine = `Due date: ${new Date(input.dueDate).toISOString().split('T')[0]} (in ${diffDays} days)`;
-    }
-
-    const taskDescription = [
-      input.title ? `Title: ${input.title}` : null,
-      input.description ? `Description: ${input.description}` : null,
-      input.monetaryValue != null ? `Monetary value at stake: $${input.monetaryValue}` : null,
-      input.revenuePotential != null ? `Revenue potential: $${input.revenuePotential}` : null,
-      input.urgency != null ? `Urgency: ${input.urgency}/10` : null,
-      input.strategicValue != null ? `Strategic value: ${input.strategicValue}/10` : null,
-      dueDateLine,
-    ].filter(Boolean).join('\n');
+    const today = new Date().toISOString().split('T')[0];
+    const prompt = REPRIORITIZE_PROMPT.replace('{today}', today);
 
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
-      max_tokens: 200,
-      temperature: 0.3,
+      max_tokens: 2000,
+      temperature: 0.2,
       messages: [
-        {
-          role: 'system',
-          content: `You are a task prioritization engine. Given a task's details, assign a priority score from 0 to 100 and a short one-sentence explanation.
-
-Scoring guidelines:
-- Tasks that protect or involve real money should score highest (70-100)
-- Tasks with revenue potential should score high (50-90)
-- Urgent tasks get a boost (+10-20 points)
-- OVERDUE tasks get +25 boost
-- Tasks due TODAY get +20 boost
-- Tasks due within 3 days get +10 boost
-- Tasks due within 7 days get +5 boost
-- Strategic/long-term value tasks score moderately (30-60)
-- Tasks with no financial or strategic upside score low (0-30)
-- If a manual boost is provided, add up to 20 points
-
-Return ONLY valid JSON: { "score": number, "reason": "one sentence" }`,
-        },
-        {
-          role: 'user',
-          content: taskDescription || 'No details provided for this task.',
-        },
+        { role: 'system', content: prompt },
+        { role: 'user', content: JSON.stringify(taskList) },
       ],
     });
 
-    const content = response.choices[0]?.message?.content ?? '{}';
-    const parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
+    const content = response.choices[0]?.message?.content ?? '[]';
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    const parsed: Array<{ id: number; score: number; reason: string }> = JSON.parse(jsonMatch?.[0] ?? '[]');
 
-    let score = Math.min(Math.max(Math.round(parsed.score ?? 0), 0), 100);
-    const boost = Math.min(Math.max(input.userManualBoost ?? 0, 0), 10);
-    score = Math.min(score + boost * 2, 100);
-
-    return {
-      score,
-      reason: parsed.reason || 'Priority assessed by AI.',
-    };
+    // Update each task
+    const now = new Date();
+    for (const item of parsed) {
+      const score = Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
+      await db.update(tasks)
+        .set({ priorityScore: score, priorityReason: item.reason || 'Priority assessed by AI.', updatedAt: now })
+        .where(and(eq(tasks.id, item.id), eq(tasks.userId, userId)));
+    }
   } catch (err) {
-    console.error('AI priority scoring failed, using fallback:', err);
-    return calculatePriorityFallback(input);
+    console.error('AI batch reprioritization failed, using fallback:', err);
+    // Fallback: score each task individually using local formula
+    for (const task of allTasks) {
+      const { score, reason } = calculatePriorityFallback({
+        title: task.title,
+        description: task.description,
+        monetaryValue: task.monetaryValue,
+        revenuePotential: task.revenuePotential,
+        urgency: task.urgency,
+        strategicValue: task.strategicValue,
+        dueDate: task.dueDate,
+      });
+      await db.update(tasks)
+        .set({ priorityScore: score, priorityReason: reason, updatedAt: new Date() })
+        .where(eq(tasks.id, task.id));
+    }
   }
 }
 
 /**
  * Local fallback priority scoring (no AI needed).
- * Used when AI is unavailable, in tests, and in seed scripts.
+ * Uses log-scale monetary weighting so higher dollar values always rank higher.
  */
 export function calculatePriorityFallback(input: PriorityInput): PriorityResult {
   const reasons: string[] = [];
   let score = 0;
 
-  const mvRaw = Math.max(input.monetaryValue ?? 0, 0);
-  const mvNorm = Math.min(mvRaw / 1000, 10);
-  score += mvNorm * 3.5;
+  // Monetary value dominates — log scale so $75K >> $1K (max ~50 points)
+  const mv = Math.max(input.monetaryValue ?? 0, 0);
+  const rp = Math.max(input.revenuePotential ?? 0, 0);
+  const maxDollar = Math.max(mv, rp);
+  if (maxDollar > 0) {
+    score += Math.min(Math.log10(maxDollar) * 10, 50);
+    if (mv > 0) reasons.push(`protects or involves $${mv.toLocaleString()}`);
+    if (rp > 0) reasons.push(`could generate $${rp.toLocaleString()} in revenue`);
+  }
 
-  const rpRaw = Math.max(input.revenuePotential ?? 0, 0);
-  const rpNorm = Math.min(rpRaw / 1000, 10);
-  score += rpNorm * 3.0;
-
+  // Urgency (max 20 points)
   const urgNorm = Math.max(Math.min(input.urgency ?? 0, 10), 0);
   score += urgNorm * 2.0;
+  if (urgNorm >= 7) reasons.push('marked as urgent');
 
+  // Strategic value (max 15 points)
   const stNorm = Math.max(Math.min(input.strategicValue ?? 0, 10), 0);
   score += stNorm * 1.5;
+  if (stNorm >= 7) reasons.push('high strategic value');
 
+  // Manual boost (max 20 points)
   const boostNorm = Math.max(Math.min(input.userManualBoost ?? 0, 10), 0);
   score += boostNorm * 2;
 
-  // Deadline proximity boost
+  // Deadline proximity boost (max 15 points)
   if (input.dueDate) {
     const now = new Date();
     const diffMs = new Date(input.dueDate).getTime() - now.getTime();
     const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-    if (diffDays < 0) { score += 25; reasons.push('overdue'); }
-    else if (diffDays === 0) { score += 20; reasons.push('due today'); }
-    else if (diffDays <= 3) { score += 10; reasons.push(`due in ${diffDays} day${diffDays > 1 ? 's' : ''}`); }
-    else if (diffDays <= 7) { score += 5; reasons.push(`due this week`); }
+    if (diffDays < 0) { score += 15; reasons.push('overdue'); }
+    else if (diffDays === 0) { score += 12; reasons.push('due today'); }
+    else if (diffDays <= 3) { score += 8; reasons.push(`due in ${diffDays} day${diffDays > 1 ? 's' : ''}`); }
+    else if (diffDays <= 7) { score += 4; reasons.push('due this week'); }
   }
 
   score = Math.min(Math.round(score), 100);
-
-  if (mvRaw > 0) {
-    reasons.push(`protects or involves $${mvRaw.toLocaleString()}`);
-  }
-  if (rpRaw > 0) {
-    reasons.push(`could generate $${rpRaw.toLocaleString()} in revenue`);
-  }
-  if (urgNorm >= 7) {
-    reasons.push('marked as urgent');
-  }
-  if (stNorm >= 7) {
-    reasons.push('high strategic value');
-  }
 
   let reason: string;
   if (reasons.length === 0) {

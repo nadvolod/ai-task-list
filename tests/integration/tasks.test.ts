@@ -3,12 +3,27 @@ import { NextRequest } from 'next/server';
 import { createTestUser, cleanupTestUser, mockSession, mockNoSession } from '../helpers/db';
 
 // Mock OpenAI to avoid real API calls for priority scoring
+// The reprioritizeAllTasks function sends a JSON array and expects an array response
 vi.mock('openai', () => ({
   default: class {
     chat = {
       completions: {
-        create: vi.fn().mockResolvedValue({
-          choices: [{ message: { content: '{"score": 50, "reason": "Test priority"}' } }],
+        create: vi.fn().mockImplementation(async (opts: { messages: Array<{ role: string; content: string }> }) => {
+          const userMsg = opts.messages?.find((m: { role: string }) => m.role === 'user')?.content ?? '';
+          // If the user message is a JSON array (batch reprioritize), return scores for each task
+          try {
+            const parsed = JSON.parse(userMsg);
+            if (Array.isArray(parsed)) {
+              const scores = parsed.map((t: { id: number }, i: number) => ({
+                id: t.id,
+                score: 90 - i * 10,
+                reason: 'Test priority',
+              }));
+              return { choices: [{ message: { content: JSON.stringify(scores) } }] };
+            }
+          } catch { /* not JSON array, fall through */ }
+          // Individual scoring fallback (used by focus endpoint etc.)
+          return { choices: [{ message: { content: '{"score": 50, "reason": "Test priority"}' } }] };
         }),
       },
     };
