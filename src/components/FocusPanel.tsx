@@ -24,16 +24,17 @@ export default function FocusPanel({ onToggleDone, refreshKey = 0 }: FocusPanelP
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch('/api/focus')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data) {
+        if (!cancelled && data) {
           setFocusTasks(data.tasks);
           setSummary(data.summary);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [refreshKey]);
 
   const greeting = (() => {
