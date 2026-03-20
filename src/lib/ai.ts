@@ -156,6 +156,7 @@ export type VoiceIntent =
   | { intent: 'complete_task'; task_query: string }
   | { intent: 'update_task'; task_query: string; updates: { title?: string; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string } }
   | { intent: 'delete_task'; task_query: string }
+  | { intent: 'delete_all_tasks' }
   | { intent: 'query_briefing' }
   | { intent: 'query_tasks'; filter?: 'all' | 'overdue' | 'today' | 'high_priority' | 'done' }
   | { intent: 'query_count'; filter?: 'all' | 'overdue' | 'today' | 'high_priority' | 'done' }
@@ -208,22 +209,25 @@ INTENTS:
 3. update_task — User wants to change a task's details (due date, urgency, etc.)
    {"intent":"update_task","task_query":"search string","updates":{"due_date":"YYYY-MM-DD","urgency":N,...}}
 
-4. delete_task — User wants to remove a task
+4. delete_task — User wants to remove a specific task
    {"intent":"delete_task","task_query":"search string to match task title"}
 
-5. query_briefing — User asks what to focus on, what's important, a summary
+5. delete_all_tasks — User wants to remove ALL tasks ("delete all", "clear everything", "remove all my tasks")
+   {"intent":"delete_all_tasks"}
+
+6. query_briefing — User asks what to focus on, what's important, a summary
    {"intent":"query_briefing"}
 
-6. query_tasks — User wants to hear their tasks (optionally filtered)
+7. query_tasks — User wants to hear their tasks (optionally filtered)
    {"intent":"query_tasks","filter":"all|overdue|today|high_priority|done"}
 
-7. query_count — User asks how many tasks they have
+8. query_count — User asks how many tasks they have
    {"intent":"query_count","filter":"all|overdue|today|high_priority|done"}
 
-8. undo_complete — User wants to reopen a completed task
+9. undo_complete — User wants to reopen a completed task
    {"intent":"undo_complete","task_query":"search string"}
 
-9. unknown — Can't determine intent
+10. unknown — Can't determine intent
    {"intent":"unknown","raw_text":"original text"}
 
 MATCHING RULES:

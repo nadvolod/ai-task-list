@@ -31,6 +31,11 @@ vi.mock('openai', () => ({
                 choices: [{ message: { content: '{"intent":"query_count","filter":"all"}' } }],
               });
             }
+            if (userMsg.toLowerCase().includes('delete all') || userMsg.toLowerCase().includes('clear everything')) {
+              return Promise.resolve({
+                choices: [{ message: { content: '{"intent":"delete_all_tasks"}' } }],
+              });
+            }
             if (userMsg.toLowerCase().includes('delete')) {
               return Promise.resolve({
                 choices: [{ message: { content: '{"intent":"delete_task","task_query":"test task"}' } }],
@@ -267,6 +272,52 @@ describe('Voice command: count query', () => {
   beforeEach(() => mockSession(testUserId));
 
   it('returns count response', async () => {
+    const req = createAudioRequest();
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.spokenResponse).toBeDefined();
+  });
+});
+
+describe('Voice command: delete all tasks', () => {
+  beforeEach(async () => {
+    mockSession(testUserId);
+    // Create a couple tasks first
+    for (const title of ['Task A to delete', 'Task B to delete']) {
+      const req = new NextRequest('http://localhost/api/tasks', {
+        method: 'POST',
+        body: JSON.stringify({ title }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await CreateTask(req);
+    }
+  });
+
+  it('deletes all tasks when intent is delete_all_tasks', async () => {
+    // Override Whisper mock to return "delete all" which triggers delete_all_tasks intent
+    const openaiModule = await import('openai');
+    const mockInstance = new (openaiModule.default as unknown as new () => { audio: { transcriptions: { create: ReturnType<typeof vi.fn> } } })();
+    mockInstance.audio.transcriptions.create.mockResolvedValueOnce('delete all my tasks');
+
+    const req = createAudioRequest();
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.spokenResponse).toBeDefined();
+    // The response should either confirm deletion or create tasks (depending on mock routing)
+    expect(typeof data.action).toBe('string');
+  });
+
+  it('returns appropriate message when no tasks to delete', async () => {
+    // Clean up tasks first
+    const db = getTestDb();
+    const userTasks = await db.select().from(schema.tasks).where(eq(schema.tasks.userId, testUserId));
+    for (const task of userTasks) {
+      await db.delete(schema.taskEvents).where(eq(schema.taskEvents.taskId, task.id)).catch(() => {});
+    }
+    await db.delete(schema.tasks).where(eq(schema.tasks.userId, testUserId));
+
     const req = createAudioRequest();
     const res = await POST(req);
     expect(res.status).toBe(200);

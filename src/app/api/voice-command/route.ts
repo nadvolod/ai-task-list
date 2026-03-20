@@ -118,6 +118,7 @@ interface CommandResult {
   tasksCreated?: TaskRow[];
   taskUpdated?: TaskRow;
   taskDeleted?: number;
+  allTasksDeleted?: boolean;
   tasksList?: TaskRow[];
   count?: number;
   summary?: string;
@@ -306,6 +307,25 @@ async function executeIntent(
         action: 'deleted',
         spokenResponse: `Deleted "${match.title}".`,
         taskDeleted: match.id,
+      };
+    }
+
+    case 'delete_all_tasks': {
+      const totalCount = userTasks.length;
+      if (totalCount === 0) {
+        return {
+          action: 'deleted_all',
+          spokenResponse: 'You have no tasks to delete.',
+          allTasksDeleted: true,
+        };
+      }
+
+      await db.delete(tasks).where(eq(tasks.userId, userId));
+
+      return {
+        action: 'deleted_all',
+        spokenResponse: `Deleted all ${totalCount} tasks.`,
+        allTasksDeleted: true,
       };
     }
 

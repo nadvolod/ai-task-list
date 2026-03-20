@@ -27,6 +27,7 @@ interface VoiceCommandResponse {
   tasksCreated?: Task[];
   taskUpdated?: Task;
   taskDeleted?: number;
+  allTasksDeleted?: boolean;
   tasksList?: Task[];
   count?: number;
   summary?: string;
@@ -36,10 +37,11 @@ interface VoiceCaptureFABProps {
   onTasksCreated: (tasks: Task[]) => void;
   onTaskUpdated: (task: Task) => void;
   onTaskDeleted: (taskId: number) => void;
+  onAllTasksDeleted: () => void;
   onRefreshRequested: () => void;
 }
 
-export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskDeleted, onRefreshRequested }: VoiceCaptureFABProps) {
+export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskDeleted, onAllTasksDeleted, onRefreshRequested }: VoiceCaptureFABProps) {
   const [state, setState] = useState<'idle' | 'recording' | 'processing' | 'speaking'>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
@@ -173,6 +175,12 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
         if (data.taskDeleted) {
           onTaskDeleted(data.taskDeleted);
           setToast('Task deleted');
+        }
+        break;
+      case 'deleted_all':
+        if (data.allTasksDeleted) {
+          onAllTasksDeleted();
+          setToast('All tasks deleted');
         }
         break;
       case 'briefing':

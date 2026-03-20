@@ -97,6 +97,10 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     setTasks(prev => prev.filter(t => t.id !== taskId));
   }
 
+  function handleAllTasksDeleted() {
+    setTasks([]);
+  }
+
   async function handleRefreshRequested() {
     try {
       const res = await fetch('/api/tasks');
@@ -359,6 +363,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
         onTasksCreated={handleVoiceTasksCreated}
         onTaskUpdated={handleVoiceTaskUpdated}
         onTaskDeleted={handleVoiceTaskDeleted}
+        onAllTasksDeleted={handleAllTasksDeleted}
         onRefreshRequested={handleRefreshRequested}
       />
 
