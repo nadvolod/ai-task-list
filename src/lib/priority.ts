@@ -8,6 +8,7 @@ export interface PriorityInput {
   urgency?: number | null;       // 1-10
   strategicValue?: number | null; // 1-10
   userManualBoost?: number;       // 0-10
+  dueDate?: Date | null;
 }
 
 export interface PriorityResult {
@@ -23,6 +24,16 @@ export async function calculatePriorityAI(input: PriorityInput): Promise<Priorit
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+    let dueDateLine: string | null = null;
+    if (input.dueDate) {
+      const now = new Date();
+      const diffMs = new Date(input.dueDate).getTime() - now.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays < 0) dueDateLine = `Due date: ${new Date(input.dueDate).toISOString().split('T')[0]} (OVERDUE by ${Math.abs(diffDays)} days)`;
+      else if (diffDays === 0) dueDateLine = `Due date: ${new Date(input.dueDate).toISOString().split('T')[0]} (DUE TODAY)`;
+      else dueDateLine = `Due date: ${new Date(input.dueDate).toISOString().split('T')[0]} (in ${diffDays} days)`;
+    }
+
     const taskDescription = [
       input.title ? `Title: ${input.title}` : null,
       input.description ? `Description: ${input.description}` : null,
@@ -30,6 +41,7 @@ export async function calculatePriorityAI(input: PriorityInput): Promise<Priorit
       input.revenuePotential != null ? `Revenue potential: $${input.revenuePotential}` : null,
       input.urgency != null ? `Urgency: ${input.urgency}/10` : null,
       input.strategicValue != null ? `Strategic value: ${input.strategicValue}/10` : null,
+      dueDateLine,
     ].filter(Boolean).join('\n');
 
     const response = await client.chat.completions.create({
@@ -45,6 +57,10 @@ Scoring guidelines:
 - Tasks that protect or involve real money should score highest (70-100)
 - Tasks with revenue potential should score high (50-90)
 - Urgent tasks get a boost (+10-20 points)
+- OVERDUE tasks get +25 boost
+- Tasks due TODAY get +20 boost
+- Tasks due within 3 days get +10 boost
+- Tasks due within 7 days get +5 boost
 - Strategic/long-term value tasks score moderately (30-60)
 - Tasks with no financial or strategic upside score low (0-30)
 - If a manual boost is provided, add up to 20 points
@@ -99,6 +115,17 @@ export function calculatePriorityFallback(input: PriorityInput): PriorityResult 
 
   const boostNorm = Math.max(Math.min(input.userManualBoost ?? 0, 10), 0);
   score += boostNorm * 2;
+
+  // Deadline proximity boost
+  if (input.dueDate) {
+    const now = new Date();
+    const diffMs = new Date(input.dueDate).getTime() - now.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) { score += 25; reasons.push('overdue'); }
+    else if (diffDays === 0) { score += 20; reasons.push('due today'); }
+    else if (diffDays <= 3) { score += 10; reasons.push(`due in ${diffDays} day${diffDays > 1 ? 's' : ''}`); }
+    else if (diffDays <= 7) { score += 5; reasons.push(`due this week`); }
+  }
 
   score = Math.min(Math.round(score), 100);
 

@@ -16,6 +16,7 @@ interface Task {
   strategicValue: number | null;
   confidence: number | null;
   sourceType: string;
+  dueDate: string | null;
 }
 
 export default function TaskDetailClient({ task: initialTask }: { task: Task }) {
@@ -27,6 +28,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
   const [revenuePotential, setRevenuePotential] = useState(initialTask.revenuePotential?.toString() ?? '');
   const [urgency, setUrgency] = useState(initialTask.urgency?.toString() ?? '');
   const [strategicValue, setStrategicValue] = useState(initialTask.strategicValue?.toString() ?? '');
+  const [dueDate, setDueDate] = useState(initialTask.dueDate ? new Date(initialTask.dueDate).toISOString().split('T')[0] : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -48,6 +50,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
       revenuePotential: revenuePotential ? parseFloat(revenuePotential) : null,
       urgency: urgency ? parseInt(urgency) : null,
       strategicValue: strategicValue ? parseInt(strategicValue) : null,
+      dueDate: dueDate || null,
     };
 
     const res = await fetch(`/api/tasks/${task.id}`, {
@@ -122,6 +125,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
     setRevenuePotential(data.task.revenuePotential?.toString() ?? '');
     setUrgency(data.task.urgency?.toString() ?? '');
     setStrategicValue(data.task.strategicValue?.toString() ?? '');
+    setDueDate(data.task.dueDate ? new Date(data.task.dueDate).toISOString().split('T')[0] : '');
   }
 
   function priorityColor(score: number) {
@@ -271,6 +275,23 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
                 <p className="text-sm text-gray-700">{task.strategicValue ?? '—'}</p>
               )}
             </div>
+          </div>
+
+          {/* Due date */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Due date</label>
+            {editing ? (
+              <input
+                type="date"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            ) : (
+              <p className="text-sm text-gray-700">
+                {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+              </p>
+            )}
           </div>
 
           {editing && (

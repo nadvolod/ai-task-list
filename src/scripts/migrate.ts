@@ -58,6 +58,9 @@ async function migrate() {
     )
   `;
 
+  // Migration: add due_date column
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_date TIMESTAMP`;
+
   // Migration: update existing FK to add ON DELETE CASCADE
   await sql`
     DO $$

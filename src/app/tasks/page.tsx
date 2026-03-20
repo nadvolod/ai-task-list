@@ -17,5 +17,12 @@ export default async function TasksPage() {
     .where(eq(tasks.userId, userId))
     .orderBy(desc(tasks.priorityScore));
 
-  return <TaskListClient initialTasks={userTasks} />;
+  const serialized = userTasks.map(t => ({
+    ...t,
+    dueDate: t.dueDate?.toISOString() ?? null,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  }));
+
+  return <TaskListClient initialTasks={serialized} />;
 }

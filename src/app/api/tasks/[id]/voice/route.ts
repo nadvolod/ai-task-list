@@ -60,11 +60,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const parsedUrgency = clamp1to10(metadata.urgency);
     const parsedStrategic = clamp1to10(metadata.strategic_value);
 
+    // Parse due date from voice metadata
+    let parsedDueDate: Date | null = null;
+    if (metadata.due_date) {
+      const d = new Date(metadata.due_date);
+      if (!isNaN(d.getTime())) parsedDueDate = d;
+    }
+
     // Use voice values if valid, otherwise keep existing
     const newMonetary = parsedMonetary !== null ? parsedMonetary : task.monetaryValue;
     const newRevenue = parsedRevenue !== null ? parsedRevenue : task.revenuePotential;
     const newUrgency = parsedUrgency !== null ? parsedUrgency : task.urgency;
     const newStrategic = parsedStrategic !== null ? parsedStrategic : task.strategicValue;
+    const newDueDate = parsedDueDate !== null ? parsedDueDate : task.dueDate;
 
     const { score, reason } = await calculatePriorityAI({
       title: task.title,
@@ -73,6 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       revenuePotential: newRevenue,
       urgency: newUrgency,
       strategicValue: newStrategic,
+      dueDate: newDueDate,
     });
 
     // Cap description length to prevent unbounded growth from multiple voice notes
@@ -95,6 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         urgency: newUrgency,
         strategicValue: newStrategic,
         description: notes,
+        dueDate: newDueDate,
         priorityScore: score,
         priorityReason: reason,
         updatedAt: new Date(),

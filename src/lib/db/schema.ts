@@ -30,6 +30,7 @@ export const tasks = pgTable('tasks', {
   strategicValue: integer('strategic_value'), // 1-10
   manualOrder: integer('manual_order'),
   confidence: real('confidence'), // 0-1
+  dueDate: timestamp('due_date'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
