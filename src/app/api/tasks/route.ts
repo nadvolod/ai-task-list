@@ -52,6 +52,13 @@ export async function POST(req: NextRequest) {
     if (body.strategicValue != null && (typeof body.strategicValue !== 'number' || body.strategicValue < 1 || body.strategicValue > 10)) {
       return NextResponse.json({ error: 'strategicValue must be between 1 and 10' }, { status: 400 });
     }
+    let dueDate: Date | null = null;
+    if (body.dueDate) {
+      dueDate = new Date(body.dueDate);
+      if (isNaN(dueDate.getTime())) {
+        return NextResponse.json({ error: 'dueDate must be a valid date' }, { status: 400 });
+      }
+    }
 
     logger.info('POST /api/tasks', { userId, title: body.title });
 
@@ -62,6 +69,7 @@ export async function POST(req: NextRequest) {
       revenuePotential: body.revenuePotential,
       urgency: body.urgency,
       strategicValue: body.strategicValue,
+      dueDate,
     });
 
     const [task] = await db
@@ -76,6 +84,7 @@ export async function POST(req: NextRequest) {
         urgency: body.urgency,
         strategicValue: body.strategicValue,
         confidence: body.confidence,
+        dueDate,
         priorityScore: score,
         priorityReason: reason,
       })

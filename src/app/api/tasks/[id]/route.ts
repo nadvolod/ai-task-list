@@ -40,6 +40,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.status !== undefined && !['todo', 'done'].includes(body.status)) {
       return NextResponse.json({ error: 'status must be "todo" or "done"' }, { status: 400 });
     }
+    let parsedDueDate: Date | null | undefined = undefined;
+    if (body.dueDate !== undefined) {
+      if (body.dueDate === null) {
+        parsedDueDate = null;
+      } else {
+        parsedDueDate = new Date(body.dueDate);
+        if (isNaN(parsedDueDate.getTime())) {
+          return NextResponse.json({ error: 'dueDate must be a valid date' }, { status: 400 });
+        }
+      }
+    }
 
     const [current] = await db
       .select()
@@ -55,6 +66,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const newRevenue = body.revenuePotential !== undefined ? body.revenuePotential : current.revenuePotential;
     const newUrgency = body.urgency !== undefined ? body.urgency : current.urgency;
     const newStrategic = body.strategicValue !== undefined ? body.strategicValue : current.strategicValue;
+    const newDueDate = parsedDueDate !== undefined ? parsedDueDate : current.dueDate;
 
     const { score, reason } = await calculatePriorityAI({
       title: newTitle,
@@ -63,6 +75,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       revenuePotential: newRevenue,
       urgency: newUrgency,
       strategicValue: newStrategic,
+      dueDate: newDueDate,
     });
 
     const [updated] = await db
@@ -76,6 +89,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         urgency: newUrgency,
         strategicValue: newStrategic,
         manualOrder: body.manualOrder !== undefined ? body.manualOrder : current.manualOrder,
+        dueDate: newDueDate,
         priorityScore: score,
         priorityReason: reason,
         updatedAt: new Date(),

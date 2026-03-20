@@ -3,9 +3,11 @@ import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest) {
   try {
+    logger.info('POST /api/auth/signup');
     const { email, password } = await req.json();
 
     if (!email || !password || password.length < 6) {
@@ -25,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ id: user.id, email: user.email });
   } catch (err) {
-    console.error('Signup error:', err);
+    logger.error('POST /api/auth/signup failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
