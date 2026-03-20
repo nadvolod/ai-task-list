@@ -20,7 +20,7 @@ export async function extractTasksFromImage(
   mimeType: string
 ): Promise<{ tasks: Array<{ title: string; confidence: number }>; rawText: string }> {
   const gemini = getGeminiClient();
-  const model = gemini.getGenerativeModel({ model: 'gemini-2.5-pro-preview-06-05' });
+  const model = gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   const result = await model.generateContent([
     {
