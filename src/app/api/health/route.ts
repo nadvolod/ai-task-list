@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 
 export async function GET() {
+  logger.info('GET /api/health');
   const checks: Record<string, string> = {};
   let healthy = true;
 
@@ -17,6 +18,7 @@ export async function GET() {
   }
 
   checks.openai = process.env.OPENAI_API_KEY ? 'configured' : 'missing';
+  checks.google_api = process.env.GOOGLE_API_KEY ? 'configured' : 'missing';
 
   logger.info('GET /api/health', { status: healthy ? 'healthy' : 'degraded' });
 

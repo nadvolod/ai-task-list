@@ -74,4 +74,64 @@ describe('calculatePriorityFallback', () => {
     const result = calculatePriorityFallback({ monetaryValue: 1000, urgency: 9 });
     expect(result.score).toBe(22);
   });
+
+  // Due date tests
+  it('boosts score for overdue tasks (+25)', () => {
+    const yesterday = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const without = calculatePriorityFallback({ urgency: 5 });
+    const withDue = calculatePriorityFallback({ urgency: 5, dueDate: yesterday });
+    expect(withDue.score).toBe(without.score + 25);
+    expect(withDue.reason).toContain('overdue');
+  });
+
+  it('boosts score for tasks due today (+20)', () => {
+    // Use a date ~12 hours from now to ensure Math.round gives 0 days
+    const today = new Date(Date.now() + 6 * 60 * 60 * 1000);
+    const without = calculatePriorityFallback({ urgency: 5 });
+    const withDue = calculatePriorityFallback({ urgency: 5, dueDate: today });
+    expect(withDue.score).toBe(without.score + 20);
+    expect(withDue.reason).toContain('due today');
+  });
+
+  it('boosts score for tasks due within 3 days (+10)', () => {
+    const inTwoDays = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const without = calculatePriorityFallback({ urgency: 5 });
+    const withDue = calculatePriorityFallback({ urgency: 5, dueDate: inTwoDays });
+    expect(withDue.score).toBe(without.score + 10);
+    expect(withDue.reason).toContain('due in');
+  });
+
+  it('boosts score for tasks due within 7 days (+5)', () => {
+    const inSixDays = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+    const without = calculatePriorityFallback({ urgency: 5 });
+    const withDue = calculatePriorityFallback({ urgency: 5, dueDate: inSixDays });
+    expect(withDue.score).toBe(without.score + 5);
+    expect(withDue.reason).toContain('due this week');
+  });
+
+  it('does not boost score for tasks due far in the future', () => {
+    const inThirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const without = calculatePriorityFallback({ urgency: 5 });
+    const withDue = calculatePriorityFallback({ urgency: 5, dueDate: inThirtyDays });
+    expect(withDue.score).toBe(without.score);
+  });
+
+  it('caps score at 100 even with due date boost', () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = calculatePriorityFallback({
+      monetaryValue: 100000,
+      revenuePotential: 100000,
+      urgency: 10,
+      strategicValue: 10,
+      userManualBoost: 10,
+      dueDate: yesterday,
+    });
+    expect(result.score).toBe(100);
+  });
+
+  it('handles null dueDate without boost', () => {
+    const result = calculatePriorityFallback({ urgency: 5, dueDate: null });
+    const resultNoDue = calculatePriorityFallback({ urgency: 5 });
+    expect(result.score).toBe(resultNoDue.score);
+  });
 });

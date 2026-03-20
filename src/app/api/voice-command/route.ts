@@ -4,103 +4,107 @@ import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { transcribeAudio, parseVoiceCommand } from '@/lib/ai';
+import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent } from '@/lib/ai';
 import { calculatePriorityAI } from '@/lib/priority';
 import { logger } from '@/lib/logger';
-import type { VoiceCommandAction } from '@/lib/ai';
 
-const MAX_AUDIO_SIZE = 10 * 1024 * 1024; // 10MB
+interface TaskRow {
+  id: number;
+  title: string;
+  status: string;
+  priorityScore: number;
+  priorityReason: string | null;
+  monetaryValue: number | null;
+  revenuePotential: number | null;
+  urgency: number | null;
+  strategicValue: number | null;
+  dueDate: Date | null;
+  description: string | null;
+}
 
-interface ActionResult {
-  type: string;
-  taskId?: number;
-  taskTitle?: string;
-  status: 'success' | 'error';
-  error?: string;
-  result?: Record<string, unknown>;
+function fuzzyMatch(query: string, tasks: TaskRow[]): TaskRow | null {
+  const q = query.toLowerCase();
+  // Exact substring match first
+  const exact = tasks.find(t => t.title.toLowerCase().includes(q));
+  if (exact) return exact;
+  // Word overlap match
+  const queryWords = q.split(/\s+/).filter(w => w.length > 2);
+  let bestMatch: TaskRow | null = null;
+  let bestScore = 0;
+  for (const task of tasks) {
+    const titleLower = task.title.toLowerCase();
+    const score = queryWords.filter(w => titleLower.includes(w)).length;
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = task;
+    }
+  }
+  return bestScore > 0 ? bestMatch : null;
+}
+
+function formatDueDate(d: Date | null): string {
+  if (!d) return '';
+  const now = new Date();
+  const diffDays = Math.round((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return `overdue by ${Math.abs(diffDays)} days`;
+  if (diffDays === 0) return 'due today';
+  if (diffDays === 1) return 'due tomorrow';
+  return `due in ${diffDays} days`;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const userId = parseInt(session.user.id);
-    logger.info('POST /api/voice-command', { userId });
-
     const formData = await req.formData();
     const audioFile = formData.get('audio') as File | null;
-    if (!audioFile) {
-      return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
-    }
+    const speakResponse = formData.get('speak') === 'true';
+    if (!audioFile) return NextResponse.json({ error: 'No audio file' }, { status: 400 });
 
-    if (audioFile.size > MAX_AUDIO_SIZE) {
-      return NextResponse.json({ error: 'Audio file too large (max 10MB)' }, { status: 400 });
-    }
+    logger.info('POST /api/voice-command', { userId });
 
-    // Transcribe audio
-    const arrayBuffer = await audioFile.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const transcription = await transcribeAudio(buffer, audioFile.name || 'recording.webm');
-    logger.info('Voice command transcribed', { userId, transcription: transcription.substring(0, 100) });
-
-    if (!transcription.trim()) {
-      return NextResponse.json({
-        transcription: '',
-        actions: [],
-        summary: "I didn't catch that. Please try again.",
-      });
-    }
-
-    // Fetch user's current tasks for context
+    // Fetch user's tasks for context
     const userTasks = await db
       .select()
       .from(tasks)
       .where(eq(tasks.userId, userId))
       .orderBy(desc(tasks.priorityScore));
 
-    // Parse voice command with AI
-    const commandResult = await parseVoiceCommand(transcription, userTasks);
-    logger.info('Voice command parsed', {
-      userId,
-      actionCount: commandResult.actions.length,
-      types: commandResult.actions.map(a => a.type),
-    });
+    const taskTitles = userTasks.map(t => t.title);
 
-    // Execute each action
-    const actionResults: ActionResult[] = [];
-    let queryResponse: string | undefined;
+    // Transcribe and classify intent
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const { transcription, intent } = await transcribeAndClassifyIntent(
+      buffer,
+      audioFile.name || 'audio.webm',
+      taskTitles
+    );
 
-    for (const action of commandResult.actions) {
+    logger.info('Voice command classified', { userId, intent: intent.intent, transcription: transcription.substring(0, 100) });
+
+    // Execute the intent
+    const result = await executeIntent(intent, userId, userTasks);
+
+    // Generate TTS if requested
+    let speechUrl: string | null = null;
+    if (speakResponse && result.spokenResponse) {
       try {
-        const result = await executeAction(action, userId);
-        actionResults.push(result);
-        if (action.type === 'query' && action.queryResponse) {
-          queryResponse = action.queryResponse;
-        }
+        const speechBuffer = await generateSpeech(result.spokenResponse);
+        const base64 = speechBuffer.toString('base64');
+        speechUrl = `data:audio/mp3;base64,${base64}`;
       } catch (err) {
-        actionResults.push({
-          type: action.type,
-          taskId: action.taskId,
-          taskTitle: action.taskTitle,
-          status: 'error',
-          error: (err as Error).message,
-        });
+        logger.error('TTS generation failed', { error: (err as Error).message });
       }
     }
 
-    logger.info('Voice command executed', {
-      userId,
-      results: actionResults.map(r => ({ type: r.type, status: r.status })),
-    });
-
     return NextResponse.json({
-      transcription: commandResult.transcription,
-      actions: actionResults,
-      summary: commandResult.summary,
-      queryResponse,
+      transcription,
+      intent: intent.intent,
+      ...result,
+      speechUrl,
     });
   } catch (err) {
     logger.error('POST /api/voice-command failed', { error: (err as Error).message });
@@ -108,178 +112,335 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function executeAction(action: VoiceCommandAction, userId: number): Promise<ActionResult> {
-  const base = { type: action.type, taskTitle: action.taskTitle };
+interface CommandResult {
+  action: string;
+  spokenResponse: string;
+  tasksCreated?: TaskRow[];
+  taskUpdated?: TaskRow;
+  taskDeleted?: number;
+  allTasksDeleted?: boolean;
+  tasksList?: TaskRow[];
+  count?: number;
+  summary?: string;
+}
 
-  switch (action.type) {
-    case 'add_task': {
-      const title = action.fields?.title || action.taskTitle;
-      if (!title) {
-        return { ...base, status: 'error', error: 'No task title provided' };
+async function executeIntent(
+  intent: VoiceIntent,
+  userId: number,
+  userTasks: TaskRow[]
+): Promise<CommandResult> {
+  const pendingTasks = userTasks.filter(t => t.status === 'todo');
+  const doneTasks = userTasks.filter(t => t.status === 'done');
+
+  switch (intent.intent) {
+    case 'create_tasks': {
+      const createdTasks: TaskRow[] = [];
+      for (const parsed of intent.tasks) {
+        if (!parsed.title?.trim()) continue;
+
+        let dueDate: Date | null = null;
+        if (parsed.due_date) {
+          const d = new Date(parsed.due_date);
+          if (!isNaN(d.getTime())) dueDate = d;
+        }
+
+        const monetaryValue = typeof parsed.monetary_value === 'number' && parsed.monetary_value >= 0 ? parsed.monetary_value : null;
+        const revenuePotential = typeof parsed.revenue_potential === 'number' && parsed.revenue_potential >= 0 ? parsed.revenue_potential : null;
+        const urgency = typeof parsed.urgency === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.urgency))) : null;
+        const strategicValue = typeof parsed.strategic_value === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.strategic_value))) : null;
+
+        const { score, reason } = await calculatePriorityAI({
+          title: parsed.title,
+          description: parsed.description,
+          monetaryValue, revenuePotential, urgency, strategicValue, dueDate,
+        });
+
+        const [task] = await db.insert(tasks).values({
+          userId, title: parsed.title.trim(), description: parsed.description || null,
+          sourceType: 'voice_context', monetaryValue, revenuePotential, urgency, strategicValue,
+          dueDate, priorityScore: score, priorityReason: reason,
+        }).returning();
+
+        await db.insert(taskEvents).values({
+          taskId: task.id, eventType: 'voice_note',
+          rawInput: JSON.stringify(parsed), parsedOutput: parsed,
+        });
+
+        createdTasks.push(task);
       }
 
-      const { score, reason } = await calculatePriorityAI({
-        title,
-        description: action.fields?.description,
-        monetaryValue: action.fields?.monetaryValue,
-        revenuePotential: action.fields?.revenuePotential,
-        urgency: action.fields?.urgency,
-        strategicValue: action.fields?.strategicValue,
-      });
-
-      const [created] = await db.insert(tasks).values({
-        userId,
-        title,
-        description: action.fields?.description ?? null,
-        sourceType: 'voice_command',
-        monetaryValue: action.fields?.monetaryValue ?? null,
-        revenuePotential: action.fields?.revenuePotential ?? null,
-        urgency: action.fields?.urgency ?? null,
-        strategicValue: action.fields?.strategicValue ?? null,
-        priorityScore: score,
-        priorityReason: reason,
-      }).returning();
-
-      await db.insert(taskEvents).values({
-        taskId: created.id,
-        eventType: 'voice_command',
-        rawInput: `Added via voice: ${title}`,
-        parsedOutput: action,
-      });
-
+      const count = createdTasks.length;
+      const titles = createdTasks.map(t => t.title).join(', ');
       return {
-        ...base,
-        taskId: created.id,
-        taskTitle: title,
-        status: 'success',
-        result: { id: created.id, title, priorityScore: score, priorityReason: reason },
+        action: 'created',
+        spokenResponse: count === 1
+          ? `Got it. Added "${createdTasks[0].title}" with priority score ${Math.round(createdTasks[0].priorityScore)}.`
+          : `Created ${count} tasks: ${titles}.`,
+        tasksCreated: createdTasks,
       };
     }
 
-    case 'mark_done':
-    case 'mark_undone': {
-      if (!action.taskId) {
-        return { ...base, status: 'error', error: 'Could not identify which task to update' };
+    case 'complete_task': {
+      const match = fuzzyMatch(intent.task_query, pendingTasks);
+      if (!match) {
+        return {
+          action: 'not_found',
+          spokenResponse: `I couldn't find a pending task matching "${intent.task_query}". You have ${pendingTasks.length} pending tasks.`,
+        };
       }
 
-      const newStatus = action.type === 'mark_done' ? 'done' : 'todo';
-      const [updated] = await db
-        .update(tasks)
-        .set({ status: newStatus, updatedAt: new Date() })
-        .where(and(eq(tasks.id, action.taskId), eq(tasks.userId, userId)))
+      const [updated] = await db.update(tasks)
+        .set({ status: 'done', updatedAt: new Date() })
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
         .returning();
 
-      if (!updated) {
-        return { ...base, taskId: action.taskId, status: 'error', error: 'Task not found' };
-      }
-
-      await db.insert(taskEvents).values({
-        taskId: action.taskId,
-        eventType: 'voice_command',
-        rawInput: `${action.type === 'mark_done' ? 'Marked done' : 'Reopened'} via voice`,
-        parsedOutput: action,
-      });
-
+      const remaining = pendingTasks.length - 1;
       return {
-        ...base,
-        taskId: action.taskId,
-        taskTitle: updated.title,
-        status: 'success',
-        result: { id: updated.id, title: updated.title, status: newStatus },
+        action: 'completed',
+        spokenResponse: `Done! Marked "${match.title}" as complete. ${remaining} tasks remaining.`,
+        taskUpdated: updated,
       };
     }
 
-    case 'update_task':
-    case 'reprioritize': {
-      if (!action.taskId) {
-        return { ...base, status: 'error', error: 'Could not identify which task to update' };
+    case 'undo_complete': {
+      const match = fuzzyMatch(intent.task_query, doneTasks);
+      if (!match) {
+        return {
+          action: 'not_found',
+          spokenResponse: `I couldn't find a completed task matching "${intent.task_query}".`,
+        };
       }
 
-      // Fetch current task
-      const [existing] = await db
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, action.taskId), eq(tasks.userId, userId)))
-        .limit(1);
+      const [updated] = await db.update(tasks)
+        .set({ status: 'todo', updatedAt: new Date() })
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
+        .returning();
 
-      if (!existing) {
-        return { ...base, taskId: action.taskId, status: 'error', error: 'Task not found' };
+      return {
+        action: 'reopened',
+        spokenResponse: `Reopened "${match.title}". It's back on your list.`,
+        taskUpdated: updated,
+      };
+    }
+
+    case 'update_task': {
+      const match = fuzzyMatch(intent.task_query, userTasks);
+      if (!match) {
+        return {
+          action: 'not_found',
+          spokenResponse: `I couldn't find a task matching "${intent.task_query}".`,
+        };
       }
 
       const updates: Record<string, unknown> = { updatedAt: new Date() };
-      if (action.fields?.description) updates.description = action.fields.description;
-      if (action.fields?.monetaryValue !== undefined) updates.monetaryValue = action.fields.monetaryValue;
-      if (action.fields?.revenuePotential !== undefined) updates.revenuePotential = action.fields.revenuePotential;
-      if (action.fields?.urgency !== undefined) updates.urgency = action.fields.urgency;
-      if (action.fields?.strategicValue !== undefined) updates.strategicValue = action.fields.strategicValue;
+      const changes: string[] = [];
 
-      // Recalculate priority with merged values
+      if (intent.updates.due_date) {
+        const d = new Date(intent.updates.due_date);
+        if (!isNaN(d.getTime())) {
+          updates.dueDate = d;
+          changes.push(`due date to ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`);
+        }
+      }
+      if (intent.updates.urgency != null) {
+        updates.urgency = Math.max(1, Math.min(10, Math.round(intent.updates.urgency)));
+        changes.push(`urgency to ${updates.urgency}`);
+      }
+      if (intent.updates.strategic_value != null) {
+        updates.strategicValue = Math.max(1, Math.min(10, Math.round(intent.updates.strategic_value)));
+        changes.push(`strategic value to ${updates.strategicValue}`);
+      }
+      if (intent.updates.monetary_value != null) {
+        updates.monetaryValue = Math.max(0, intent.updates.monetary_value);
+        changes.push(`monetary value to $${(updates.monetaryValue as number).toLocaleString()}`);
+      }
+      if (intent.updates.revenue_potential != null) {
+        updates.revenuePotential = Math.max(0, intent.updates.revenue_potential);
+        changes.push(`revenue potential to $${(updates.revenuePotential as number).toLocaleString()}`);
+      }
+      if (intent.updates.title) {
+        updates.title = intent.updates.title;
+        changes.push(`title to "${intent.updates.title}"`);
+      }
+      if (intent.updates.description) {
+        updates.description = intent.updates.description;
+        changes.push('description');
+      }
+
+      // Recalculate priority
       const { score, reason } = await calculatePriorityAI({
-        title: existing.title,
-        description: (updates.description as string) ?? existing.description,
-        monetaryValue: (updates.monetaryValue as number) ?? existing.monetaryValue,
-        revenuePotential: (updates.revenuePotential as number) ?? existing.revenuePotential,
-        urgency: (updates.urgency as number) ?? existing.urgency,
-        strategicValue: (updates.strategicValue as number) ?? existing.strategicValue,
+        title: (updates.title as string) ?? match.title,
+        description: (updates.description as string) ?? match.description,
+        monetaryValue: (updates.monetaryValue as number) ?? match.monetaryValue,
+        revenuePotential: (updates.revenuePotential as number) ?? match.revenuePotential,
+        urgency: (updates.urgency as number) ?? match.urgency,
+        strategicValue: (updates.strategicValue as number) ?? match.strategicValue,
+        dueDate: (updates.dueDate as Date) ?? match.dueDate,
       });
-
       updates.priorityScore = score;
       updates.priorityReason = reason;
 
-      const [updated] = await db
-        .update(tasks)
+      const [updated] = await db.update(tasks)
         .set(updates)
-        .where(and(eq(tasks.id, action.taskId), eq(tasks.userId, userId)))
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
         .returning();
 
-      await db.insert(taskEvents).values({
-        taskId: action.taskId,
-        eventType: 'voice_command',
-        rawInput: `Updated via voice`,
-        parsedOutput: action,
-      });
-
       return {
-        ...base,
-        taskId: action.taskId,
-        taskTitle: updated.title,
-        status: 'success',
-        result: { id: updated.id, title: updated.title, priorityScore: score, priorityReason: reason },
+        action: 'updated',
+        spokenResponse: `Updated "${match.title}": ${changes.join(', ')}. Priority score is now ${Math.round(score)}.`,
+        taskUpdated: updated,
       };
     }
 
     case 'delete_task': {
-      if (!action.taskId) {
-        return { ...base, status: 'error', error: 'Could not identify which task to delete' };
+      const match = fuzzyMatch(intent.task_query, userTasks);
+      if (!match) {
+        return {
+          action: 'not_found',
+          spokenResponse: `I couldn't find a task matching "${intent.task_query}".`,
+        };
       }
 
-      const [deleted] = await db
-        .delete(tasks)
-        .where(and(eq(tasks.id, action.taskId), eq(tasks.userId, userId)))
-        .returning();
-
-      if (!deleted) {
-        return { ...base, taskId: action.taskId, status: 'error', error: 'Task not found' };
-      }
+      await db.delete(tasks).where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
       return {
-        ...base,
-        taskId: action.taskId,
-        taskTitle: deleted.title,
-        status: 'success',
-        result: { id: deleted.id, title: deleted.title },
+        action: 'deleted',
+        spokenResponse: `Deleted "${match.title}".`,
+        taskDeleted: match.id,
       };
     }
 
-    case 'query': {
+    case 'delete_all_tasks': {
+      const totalCount = userTasks.length;
+      if (totalCount === 0) {
+        return {
+          action: 'deleted_all',
+          spokenResponse: 'You have no tasks to delete.',
+          allTasksDeleted: true,
+        };
+      }
+
+      await db.delete(tasks).where(eq(tasks.userId, userId));
+
       return {
-        ...base,
-        status: 'success',
-        result: { response: action.queryResponse },
+        action: 'deleted_all',
+        spokenResponse: `Deleted all ${totalCount} tasks.`,
+        allTasksDeleted: true,
       };
     }
 
+    case 'query_briefing': {
+      const top3 = pendingTasks.slice(0, 3);
+      if (top3.length === 0) {
+        return {
+          action: 'briefing',
+          spokenResponse: 'You have no pending tasks. Enjoy your free time!',
+          summary: 'No pending tasks.',
+        };
+      }
+
+      const totalValue = pendingTasks.reduce((s, t) => s + (t.monetaryValue ?? 0) + (t.revenuePotential ?? 0), 0);
+      const overdueCount = pendingTasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date()).length;
+
+      const taskDescriptions = top3.map((t, i) => {
+        const parts = [`${i + 1}. ${t.title}`];
+        if (t.dueDate) parts.push(formatDueDate(t.dueDate));
+        if (t.monetaryValue) parts.push(`$${t.monetaryValue.toLocaleString()} at stake`);
+        return parts.join(', ');
+      }).join('. ');
+
+      let summary = `You have ${pendingTasks.length} pending tasks.`;
+      if (overdueCount > 0) summary += ` ${overdueCount} are overdue.`;
+      if (totalValue > 0) summary += ` Total value: $${totalValue.toLocaleString()}.`;
+      summary += ` Top priorities: ${taskDescriptions}.`;
+
+      return {
+        action: 'briefing',
+        spokenResponse: summary,
+        tasksList: top3,
+        summary,
+      };
+    }
+
+    case 'query_tasks': {
+      let filtered = pendingTasks;
+      let filterLabel = 'pending';
+
+      if (intent.filter === 'overdue') {
+        filtered = pendingTasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date());
+        filterLabel = 'overdue';
+      } else if (intent.filter === 'today') {
+        const today = new Date().toDateString();
+        filtered = pendingTasks.filter(t => t.dueDate && new Date(t.dueDate).toDateString() === today);
+        filterLabel = 'due today';
+      } else if (intent.filter === 'high_priority') {
+        filtered = pendingTasks.filter(t => t.priorityScore >= 60);
+        filterLabel = 'high priority';
+      } else if (intent.filter === 'done') {
+        filtered = doneTasks;
+        filterLabel = 'completed';
+      }
+
+      if (filtered.length === 0) {
+        return {
+          action: 'query',
+          spokenResponse: `You have no ${filterLabel} tasks.`,
+          tasksList: [],
+          count: 0,
+        };
+      }
+
+      const maxRead = 5;
+      const taskNames = filtered.slice(0, maxRead).map((t, i) => {
+        const parts = [`${i + 1}. ${t.title}`];
+        if (t.dueDate) parts.push(formatDueDate(t.dueDate));
+        return parts.join(', ');
+      }).join('. ');
+
+      const moreText = filtered.length > maxRead ? ` And ${filtered.length - maxRead} more.` : '';
+
+      return {
+        action: 'query',
+        spokenResponse: `You have ${filtered.length} ${filterLabel} tasks. ${taskNames}.${moreText}`,
+        tasksList: filtered,
+        count: filtered.length,
+      };
+    }
+
+    case 'query_count': {
+      let count: number;
+      let filterLabel: string;
+
+      if (intent.filter === 'overdue') {
+        count = pendingTasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date()).length;
+        filterLabel = 'overdue';
+      } else if (intent.filter === 'today') {
+        const today = new Date().toDateString();
+        count = pendingTasks.filter(t => t.dueDate && new Date(t.dueDate).toDateString() === today).length;
+        filterLabel = 'due today';
+      } else if (intent.filter === 'high_priority') {
+        count = pendingTasks.filter(t => t.priorityScore >= 60).length;
+        filterLabel = 'high priority';
+      } else if (intent.filter === 'done') {
+        count = doneTasks.length;
+        filterLabel = 'completed';
+      } else {
+        count = pendingTasks.length;
+        filterLabel = 'pending';
+      }
+
+      return {
+        action: 'count',
+        spokenResponse: `You have ${count} ${filterLabel} task${count !== 1 ? 's' : ''}.`,
+        count,
+      };
+    }
+
+    case 'unknown':
     default:
-      return { ...base, status: 'error', error: `Unknown action type: ${action.type}` };
+      return {
+        action: 'unknown',
+        spokenResponse: `I didn't understand that. You can say things like "add a task", "mark the budget review as done", "what's overdue?", or "what should I focus on?"`,
+      };
   }
 }

@@ -20,12 +20,10 @@ const { GET, POST } = await import('../../src/app/api/tasks/route');
 const { PATCH, DELETE } = await import('../../src/app/api/tasks/[id]/route');
 
 let testUserId: number;
-let testEmail: string;
 
 beforeAll(async () => {
   const user = await createTestUser('tasks-test');
   testUserId = user.userId;
-  testEmail = user.email;
 });
 
 afterAll(async () => {
@@ -125,6 +123,31 @@ describe('POST /api/tasks', () => {
     const res = await POST(req);
     expect(res.status).toBe(401);
   });
+
+  it('creates a task with a due date', async () => {
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Task with due date', dueDate: '2026-04-15' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.title).toBe('Task with due date');
+    expect(data.dueDate).toBeDefined();
+  });
+
+  it('rejects invalid due date with 400', async () => {
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Test', dueDate: 'not-a-date' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain('dueDate');
+  });
 });
 
 describe('PATCH /api/tasks/:id', () => {
@@ -154,6 +177,40 @@ describe('PATCH /api/tasks/:id', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.title).toBe('Updated title');
+  });
+
+  it('updates a task with due date', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ dueDate: '2026-05-01' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.dueDate).toBeDefined();
+  });
+
+  it('clears a due date with null', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ dueDate: null }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.dueDate).toBeNull();
+  });
+
+  it('rejects invalid due date in PATCH', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ dueDate: 'garbage' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(400);
   });
 
   it('returns 400 for non-numeric ID', async () => {

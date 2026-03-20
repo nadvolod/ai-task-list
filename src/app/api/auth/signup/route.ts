@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest) {
   try {
+    logger.info('POST /api/auth/signup');
     const { email, password } = await req.json();
 
     if (!email || !password || password.length < 6) {

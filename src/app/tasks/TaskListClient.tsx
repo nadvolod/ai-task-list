@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { signOut } from 'next-auth/react';
+import { useState } from 'react';
 import Link from 'next/link';
-import VoiceCommandButton from './VoiceCommandButton';
+import VoiceCaptureFAB from '@/components/VoiceCaptureFAB';
+import FocusPanel from '@/components/FocusPanel';
+import SearchFilterBar, { type FilterType } from '@/components/SearchFilterBar';
+import BottomNav from '@/components/BottomNav';
 
 interface Task {
   id: number;
@@ -18,11 +20,19 @@ interface Task {
   strategicValue: number | null;
   confidence: number | null;
   sourceType: string;
+  dueDate: string | null;
 }
 
 export default function TaskListClient({ initialTasks }: { initialTasks: Task[] }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [loading, setLoading] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+
+  // Inline quick-add state
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddTitle, setQuickAddTitle] = useState('');
+  const [quickAddLoading, setQuickAddLoading] = useState(false);
 
   async function toggleDone(task: Task) {
     const newStatus = task.status === 'done' ? 'todo' : 'done';
@@ -38,6 +48,11 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     }
   }
 
+  function handleToggleDoneById(taskId: number) {
+    const task = tasks.find(t => t.id === taskId);
+    if (task) toggleDone(task);
+  }
+
   async function deleteTask(id: number) {
     if (!confirm('Delete this task?')) return;
     setLoading(id);
@@ -50,21 +65,108 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     setLoading(null);
   }
 
-  const refreshTasks = useCallback(async () => {
-    const res = await fetch('/api/tasks');
-    if (res.ok) {
-      const data = await res.json();
-      setTasks(data);
-    }
-  }, []);
+  async function handleQuickAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!quickAddTitle.trim()) return;
+    setQuickAddLoading(true);
 
-  const pending = tasks.filter(t => t.status === 'todo');
-  const done = tasks.filter(t => t.status === 'done');
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: quickAddTitle.trim() }),
+    });
+
+    if (res.ok) {
+      const newTask = await res.json();
+      setTasks(prev => [newTask, ...prev]);
+      setQuickAddTitle('');
+      setQuickAddOpen(false);
+    }
+    setQuickAddLoading(false);
+  }
+
+  function handleVoiceTasksCreated(newTasks: Task[]) {
+    setTasks(prev => [...newTasks, ...prev]);
+  }
+
+  function handleVoiceTaskUpdated(updated: Task) {
+    setTasks(prev => prev.map(t => t.id === updated.id ? { ...updated, dueDate: updated.dueDate ?? null } : t));
+  }
+
+  function handleVoiceTaskDeleted(taskId: number) {
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+  }
+
+  function handleAllTasksDeleted() {
+    setTasks([]);
+  }
+
+  async function handleRefreshRequested() {
+    try {
+      const res = await fetch('/api/tasks');
+      if (res.ok) {
+        const refreshed = await res.json();
+        setTasks(refreshed);
+      }
+    } catch { /* silent */ }
+  }
+
+  // Filter and search logic
+  const now = new Date();
+
+  function isDueToday(d: string | null) {
+    if (!d) return false;
+    const due = new Date(d);
+    return due.toDateString() === now.toDateString();
+  }
+
+  function isOverdue(d: string | null) {
+    if (!d) return false;
+    return new Date(d).getTime() < now.getTime() && !isDueToday(d);
+  }
+
+  const todayCount = tasks.filter(t => t.status === 'todo' && isDueToday(t.dueDate)).length;
+  const overdueCount = tasks.filter(t => t.status === 'todo' && isOverdue(t.dueDate)).length;
+  const highCount = tasks.filter(t => t.status === 'todo' && t.priorityScore >= 60).length;
+
+  let filtered = tasks;
+
+  // Apply filter
+  if (activeFilter === 'today') filtered = filtered.filter(t => t.status === 'todo' && isDueToday(t.dueDate));
+  else if (activeFilter === 'overdue') filtered = filtered.filter(t => t.status === 'todo' && isOverdue(t.dueDate));
+  else if (activeFilter === 'high') filtered = filtered.filter(t => t.status === 'todo' && t.priorityScore >= 60);
+  else if (activeFilter === 'done') filtered = filtered.filter(t => t.status === 'done');
+
+  // Apply search
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(t =>
+      t.title.toLowerCase().includes(q) ||
+      (t.description && t.description.toLowerCase().includes(q))
+    );
+  }
+
+  const pending = activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'todo');
+  const done = activeFilter === 'done' ? filtered : (activeFilter === 'all' ? filtered.filter(t => t.status === 'done') : []);
 
   function priorityColor(score: number) {
     if (score >= 60) return 'text-red-600 bg-red-50';
     if (score >= 30) return 'text-orange-600 bg-orange-50';
     return 'text-gray-500 bg-gray-100';
+  }
+
+  function dueDateBadge(dueDate: string | null) {
+    if (!dueDate) return null;
+    const due = new Date(dueDate);
+    const diffDays = Math.round((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return <span className="text-xs text-red-700 bg-red-50 px-2 py-0.5 rounded-full font-medium">Overdue</span>;
+    if (diffDays === 0) return <span className="text-xs text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full font-medium">Due today</span>;
+    if (diffDays === 1) return <span className="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full font-medium">Tomorrow</span>;
+    if (diffDays <= 7) {
+      const dayName = due.toLocaleDateString('en-US', { weekday: 'short' });
+      return <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full font-medium">Due {dayName}</span>;
+    }
+    return <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>;
   }
 
   function renderTask(task: Task) {
@@ -115,6 +217,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 </span>
               )}
 
+              {dueDateBadge(task.dueDate)}
+
               {(task.confidence != null && task.confidence < 0.7) && (
                 <span className="text-xs text-yellow-700 bg-yellow-50 px-2 py-0.5 rounded-full">
                   low confidence
@@ -156,43 +260,85 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
   }
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-10">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <h1 className="font-bold text-gray-900">My Tasks</h1>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/upload"
-              className="text-sm text-blue-600 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-            >
-              + Import
-            </Link>
-            <button
-              onClick={() => signOut({ callbackUrl: '/auth/signin' })}
-              className="text-sm text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              Sign out
-            </button>
-          </div>
         </div>
       </header>
 
       <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
-        {/* Add task button */}
-        <Link
-          href="/tasks/new"
-          className="block w-full bg-blue-600 text-white text-sm font-medium rounded-xl py-3 text-center hover:bg-blue-700 transition-colors"
-        >
-          + Add task
-        </Link>
+        {/* Focus Panel */}
+        <FocusPanel onToggleDone={handleToggleDoneById} />
+
+        {/* Inline quick-add */}
+        {quickAddOpen ? (
+          <form onSubmit={handleQuickAdd} className="flex gap-2">
+            <input
+              type="text"
+              value={quickAddTitle}
+              onChange={e => setQuickAddTitle(e.target.value)}
+              placeholder="What needs to happen?"
+              autoFocus
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="submit"
+              disabled={quickAddLoading || !quickAddTitle.trim()}
+              className="bg-blue-600 text-white px-4 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {quickAddLoading ? '...' : 'Add'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setQuickAddOpen(false); setQuickAddTitle(''); }}
+              className="text-gray-400 hover:text-gray-600 px-2"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </form>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setQuickAddOpen(true)}
+              className="flex-1 bg-blue-600 text-white text-sm font-medium rounded-xl py-3 text-center hover:bg-blue-700 transition-colors"
+            >
+              + Add task
+            </button>
+            <Link
+              href="/tasks/new"
+              className="bg-gray-100 text-gray-600 text-sm font-medium rounded-xl py-3 px-4 hover:bg-gray-200 transition-colors flex items-center"
+              title="Add with details"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </Link>
+          </div>
+        )}
+
+        {/* Search and Filter */}
+        <SearchFilterBar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          activeFilter={activeFilter}
+          onFilterChange={setActiveFilter}
+          counts={{ today: todayCount, overdue: overdueCount, high: highCount }}
+        />
 
         {/* Task list */}
         {pending.length === 0 && done.length === 0 && (
           <div className="text-center py-16 text-gray-400">
             <p className="text-4xl mb-3">📋</p>
-            <p className="text-sm">No tasks yet.</p>
-            <p className="text-xs mt-1">Add a task or import from an image.</p>
+            <p className="text-sm">
+              {searchQuery || activeFilter !== 'all' ? 'No tasks match your filter.' : 'No tasks yet.'}
+            </p>
+            <p className="text-xs mt-1">
+              {searchQuery || activeFilter !== 'all' ? 'Try a different search or filter.' : 'Add a task or tap the mic to speak.'}
+            </p>
           </div>
         )}
 
@@ -212,7 +358,17 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
         )}
       </div>
 
-      <VoiceCommandButton onTasksChanged={refreshTasks} />
+      {/* Voice Command FAB */}
+      <VoiceCaptureFAB
+        onTasksCreated={handleVoiceTasksCreated}
+        onTaskUpdated={handleVoiceTaskUpdated}
+        onTaskDeleted={handleVoiceTaskDeleted}
+        onAllTasksDeleted={handleAllTasksDeleted}
+        onRefreshRequested={handleRefreshRequested}
+      />
+
+      {/* Bottom Navigation */}
+      <BottomNav />
     </main>
   );
 }

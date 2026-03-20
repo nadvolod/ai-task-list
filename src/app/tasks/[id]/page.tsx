@@ -23,5 +23,12 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   if (!task) notFound();
 
-  return <TaskDetailClient task={task} />;
+  const serialized = {
+    ...task,
+    dueDate: task.dueDate?.toISOString() ?? null,
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+  };
+
+  return <TaskDetailClient task={serialized} />;
 }
