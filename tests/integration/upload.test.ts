@@ -23,17 +23,25 @@ vi.mock('@google/generative-ai', () => ({
   },
 }));
 
-// Mock OpenAI for priority scoring (still uses GPT-4o-mini)
+// Mock OpenAI for batch priority scoring (reprioritizeAllTasks sends JSON array)
 vi.mock('openai', () => ({
   default: class {
     chat = {
       completions: {
-        create: vi.fn().mockResolvedValue({
-          choices: [{
-            message: {
-              content: JSON.stringify({ score: 30, reason: 'Test priority' }),
-            },
-          }],
+        create: vi.fn().mockImplementation(async (opts: { messages: Array<{ role: string; content: string }> }) => {
+          const userMsg = opts.messages?.find((m: { role: string }) => m.role === 'user')?.content ?? '';
+          try {
+            const parsed = JSON.parse(userMsg);
+            if (Array.isArray(parsed)) {
+              const scores = parsed.map((t: { id: number }, i: number) => ({
+                id: t.id,
+                score: 80 - i * 10,
+                reason: 'Test priority',
+              }));
+              return { choices: [{ message: { content: JSON.stringify(scores) } }] };
+            }
+          } catch { /* not JSON array */ }
+          return { choices: [{ message: { content: '{"score": 30, "reason": "Test priority"}' } }] };
         }),
       },
     };

@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent } from '@/lib/ai';
-import { calculatePriorityAI } from '@/lib/priority';
+import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 interface TaskRow {
@@ -149,16 +149,10 @@ async function executeIntent(
         const urgency = typeof parsed.urgency === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.urgency))) : null;
         const strategicValue = typeof parsed.strategic_value === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.strategic_value))) : null;
 
-        const { score, reason } = await calculatePriorityAI({
-          title: parsed.title,
-          description: parsed.description,
-          monetaryValue, revenuePotential, urgency, strategicValue, dueDate,
-        });
-
         const [task] = await db.insert(tasks).values({
           userId, title: parsed.title.trim(), description: parsed.description || null,
           sourceType: 'voice_context', monetaryValue, revenuePotential, urgency, strategicValue,
-          dueDate, priorityScore: score, priorityReason: reason,
+          dueDate,
         }).returning();
 
         await db.insert(taskEvents).values({
@@ -169,14 +163,26 @@ async function executeIntent(
         createdTasks.push(task);
       }
 
-      const count = createdTasks.length;
-      const titles = createdTasks.map(t => t.title).join(', ');
+      // Re-rank all tasks relative to each other
+      if (createdTasks.length > 0) {
+        await reprioritizeAllTasks(userId);
+      }
+
+      // Re-fetch to get updated scores
+      const refreshed: TaskRow[] = [];
+      for (const t of createdTasks) {
+        const [r] = await db.select().from(tasks).where(eq(tasks.id, t.id));
+        refreshed.push(r);
+      }
+
+      const count = refreshed.length;
+      const titles = refreshed.map(t => t.title).join(', ');
       return {
         action: 'created',
         spokenResponse: count === 1
-          ? `Got it. Added "${createdTasks[0].title}" with priority score ${Math.round(createdTasks[0].priorityScore)}.`
+          ? `Got it. Added "${refreshed[0].title}" with priority score ${Math.round(refreshed[0].priorityScore)}.`
           : `Created ${count} tasks: ${titles}.`,
-        tasksCreated: createdTasks,
+        tasksCreated: refreshed,
       };
     }
 
@@ -193,6 +199,8 @@ async function executeIntent(
         .set({ status: 'done', updatedAt: new Date() })
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
         .returning();
+
+      await reprioritizeAllTasks(userId);
 
       const remaining = pendingTasks.length - 1;
       return {
@@ -267,27 +275,20 @@ async function executeIntent(
         changes.push('description');
       }
 
-      // Recalculate priority
-      const { score, reason } = await calculatePriorityAI({
-        title: (updates.title as string) ?? match.title,
-        description: (updates.description as string) ?? match.description,
-        monetaryValue: (updates.monetaryValue as number) ?? match.monetaryValue,
-        revenuePotential: (updates.revenuePotential as number) ?? match.revenuePotential,
-        urgency: (updates.urgency as number) ?? match.urgency,
-        strategicValue: (updates.strategicValue as number) ?? match.strategicValue,
-        dueDate: (updates.dueDate as Date) ?? match.dueDate,
-      });
-      updates.priorityScore = score;
-      updates.priorityReason = reason;
-
-      const [updated] = await db.update(tasks)
+      await db.update(tasks)
         .set(updates)
-        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
-        .returning();
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
+
+      // Re-rank all tasks relative to each other
+      await reprioritizeAllTasks(userId);
+
+      // Re-fetch to get updated score
+      const [updated] = await db.select().from(tasks)
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
       return {
         action: 'updated',
-        spokenResponse: `Updated "${match.title}": ${changes.join(', ')}. Priority score is now ${Math.round(score)}.`,
+        spokenResponse: `Updated "${match.title}": ${changes.join(', ')}. Priority score is now ${Math.round(updated.priorityScore)}.`,
         taskUpdated: updated,
       };
     }
@@ -302,6 +303,8 @@ async function executeIntent(
       }
 
       await db.delete(tasks).where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
+
+      await reprioritizeAllTasks(userId);
 
       return {
         action: 'deleted',

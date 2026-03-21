@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { transcribeAndParseVoice } from '@/lib/ai';
-import { calculatePriorityAI } from '@/lib/priority';
+import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -74,16 +74,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const newStrategic = parsedStrategic !== null ? parsedStrategic : task.strategicValue;
     const newDueDate = parsedDueDate !== null ? parsedDueDate : task.dueDate;
 
-    const { score, reason } = await calculatePriorityAI({
-      title: task.title,
-      description: task.description,
-      monetaryValue: newMonetary,
-      revenuePotential: newRevenue,
-      urgency: newUrgency,
-      strategicValue: newStrategic,
-      dueDate: newDueDate,
-    });
-
     // Cap description length to prevent unbounded growth from multiple voice notes
     const MAX_DESCRIPTION_LENGTH = 2000;
     const voiceAppend = `Voice note: ${transcription}`;
@@ -96,7 +86,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       notes = `${task.description}\n\n${voiceAppend}`;
     }
 
-    const [updated] = await db
+    await db
       .update(tasks)
       .set({
         monetaryValue: newMonetary,
@@ -105,14 +95,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         strategicValue: newStrategic,
         description: notes,
         dueDate: newDueDate,
-        priorityScore: score,
-        priorityReason: reason,
         updatedAt: new Date(),
       })
-      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)))
-      .returning();
+      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
 
-    logger.info('Task updated via voice', { taskId, score });
+    await reprioritizeAllTasks(userId);
+
+    const [updated] = await db.select().from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
+
+    logger.info('Task updated via voice', { taskId, score: updated.priorityScore });
     return NextResponse.json({ task: updated, transcription, metadata });
   } catch (err) {
     logger.error('POST /api/tasks/:id/voice failed', { error: (err as Error).message });

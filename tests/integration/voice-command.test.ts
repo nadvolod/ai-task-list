@@ -47,8 +47,21 @@ vi.mock('openai', () => ({
             });
           }
 
-          // Priority scoring
+          // Batch reprioritization (reprioritizeAllTasks sends JSON array)
           if (systemMsg.includes('prioritization')) {
+            try {
+              const parsed = JSON.parse(userMsg);
+              if (Array.isArray(parsed)) {
+                const scores = parsed.map((t: { id: number }, i: number) => ({
+                  id: t.id,
+                  score: 90 - i * 10,
+                  reason: 'Voice task priority',
+                }));
+                return Promise.resolve({
+                  choices: [{ message: { content: JSON.stringify(scores) } }],
+                });
+              }
+            } catch { /* not JSON array */ }
             return Promise.resolve({
               choices: [{ message: { content: '{"score": 55, "reason": "Voice task priority"}' } }],
             });

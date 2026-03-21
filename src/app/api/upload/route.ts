@@ -3,14 +3,14 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { uploads, tasks } from '@/lib/db/schema';
+import { and, eq, inArray } from 'drizzle-orm';
 import { extractTasksFromImage } from '@/lib/ai';
-import { calculatePriorityAI } from '@/lib/priority';
+import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_TASKS_PER_UPLOAD = 50;
-const AI_SCORING_CONCURRENCY = 5;
 
 export async function POST(req: NextRequest) {
   try {
@@ -50,32 +50,33 @@ export async function POST(req: NextRequest) {
       .values({ userId, extractedText: rawText })
       .returning();
 
-    // Score tasks via AI with concurrency limit
-    const taskValues = [];
-    for (let i = 0; i < cappedTasks.length; i += AI_SCORING_CONCURRENCY) {
-      const batch = cappedTasks.slice(i, i + AI_SCORING_CONCURRENCY);
-      const results = await Promise.all(
-        batch.map(async (item) => {
-          const { score, reason } = await calculatePriorityAI({ title: item.title });
-          return {
-            userId,
-            title: item.title,
-            sourceType: 'image_upload' as const,
-            confidence: item.confidence,
-            priorityScore: score,
-            priorityReason: reason,
-          };
-        })
-      );
-      taskValues.push(...results);
-    }
+    // Insert tasks first (without scores), then reprioritize all at once
+    const taskValues = cappedTasks.map(item => ({
+      userId,
+      title: item.title,
+      sourceType: 'image_upload' as const,
+      confidence: item.confidence,
+    }));
 
     const createdTasks = taskValues.length > 0
       ? await db.insert(tasks).values(taskValues).returning()
       : [];
 
-    logger.info('Upload complete', { uploadId: upload.id, tasksCreated: createdTasks.length });
-    return NextResponse.json({ uploadId: upload.id, tasks: createdTasks });
+    // Re-rank all tasks relative to each other (including the new ones)
+    if (createdTasks.length > 0) {
+      await reprioritizeAllTasks(userId);
+    }
+
+    // Re-fetch to get updated priority scores
+    const taskIds = createdTasks.map(t => t.id);
+    const updatedTasks = taskIds.length > 0
+      ? await db.select().from(tasks).where(
+          and(eq(tasks.userId, userId), inArray(tasks.id, taskIds))
+        )
+      : [];
+
+    logger.info('Upload complete', { uploadId: upload.id, tasksCreated: updatedTasks.length });
+    return NextResponse.json({ uploadId: upload.id, tasks: updatedTasks });
   } catch (err) {
     logger.error('POST /api/upload failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

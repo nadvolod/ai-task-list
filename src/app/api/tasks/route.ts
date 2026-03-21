@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
-import { calculatePriorityAI } from '@/lib/priority';
+import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 export async function GET(_req: NextRequest) {
@@ -62,16 +62,6 @@ export async function POST(req: NextRequest) {
 
     logger.info('POST /api/tasks', { userId, title: body.title });
 
-    const { score, reason } = await calculatePriorityAI({
-      title: body.title,
-      description: body.description,
-      monetaryValue: body.monetaryValue,
-      revenuePotential: body.revenuePotential,
-      urgency: body.urgency,
-      strategicValue: body.strategicValue,
-      dueDate,
-    });
-
     const [task] = await db
       .insert(tasks)
       .values({
@@ -85,13 +75,16 @@ export async function POST(req: NextRequest) {
         strategicValue: body.strategicValue,
         confidence: body.confidence,
         dueDate,
-        priorityScore: score,
-        priorityReason: reason,
       })
       .returning();
 
-    logger.info('Task created', { taskId: task.id, userId, score });
-    return NextResponse.json(task, { status: 201 });
+    await reprioritizeAllTasks(userId);
+
+    // Re-fetch the task to get updated priority score
+    const [updated] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+
+    logger.info('Task created', { taskId: task.id, userId, score: updated.priorityScore });
+    return NextResponse.json(updated, { status: 201 });
   } catch (err) {
     logger.error('POST /api/tasks failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

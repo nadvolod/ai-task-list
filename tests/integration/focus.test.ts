@@ -9,12 +9,28 @@ vi.mock('openai', () => ({
       completions: {
         create: vi.fn().mockImplementation(({ messages }) => {
           const systemMsg = messages[0]?.content ?? '';
+          const userMsg = messages[messages.length - 1]?.content ?? '';
           if (systemMsg.includes('executive briefing')) {
             return Promise.resolve({
               choices: [{ message: { content: 'Focus on your highest-priority items today.' } }],
             });
           }
-          // Priority scoring
+          // Batch reprioritization
+          if (systemMsg.includes('prioritization')) {
+            try {
+              const parsed = JSON.parse(userMsg);
+              if (Array.isArray(parsed)) {
+                const scores = parsed.map((t: { id: number }, i: number) => ({
+                  id: t.id,
+                  score: 90 - i * 5,
+                  reason: 'Test priority',
+                }));
+                return Promise.resolve({
+                  choices: [{ message: { content: JSON.stringify(scores) } }],
+                });
+              }
+            } catch { /* not JSON array */ }
+          }
           return Promise.resolve({
             choices: [{ message: { content: '{"score": 60, "reason": "Test priority"}' } }],
           });
