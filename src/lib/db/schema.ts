@@ -40,12 +40,22 @@ export const tasks = pgTable('tasks', {
   recurrenceEndDate: timestamp('recurrence_end_date'),
   recurrenceParentId: integer('recurrence_parent_id'), // links instances in a recurrence chain
   recurrenceActive: text('recurrence_active').default('true'),
+  // Category (Issue #13)
+  category: text('category'), // user-defined category e.g. "Temporal", "Personal"
   // Assignee & priority override (Issue #11)
   assignee: text('assignee'),
   manualPriorityScore: real('manual_priority_score'),
   manualPriorityReason: text('manual_priority_reason'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const categoryBoosts = pgTable('category_boosts', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  category: text('category').notNull(),
+  boost: integer('boost').notNull().default(0), // priority points added (e.g. +15)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 export const priorityOverrides = pgTable('priority_overrides', {

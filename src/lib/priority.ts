@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { db } from '@/lib/db';
-import { tasks, priorityOverrides } from '@/lib/db/schema';
+import { tasks, priorityOverrides, categoryBoosts } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 
 export interface PriorityInput {
@@ -27,6 +27,7 @@ RANKING PRINCIPLES:
 3. EFFORT is the final tiebreaker. Among tasks with similar value and urgency, quicker/easier tasks rank slightly higher (faster ROI).
 4. MANUAL OVERRIDES must be respected. If a task has a "manual_priority" field, use that exact score — do NOT change it. The user explicitly set it.
 5. Recurring tasks should not be penalized for being recurring. Treat each instance on its own merits.
+6. CATEGORY BOOSTS: If a task has a "category_boost" field, add that many points to its score AFTER computing the base score. This is the user's preference for prioritizing certain categories of work.
 
 SCORING RULES:
 - Scores must be RELATIVE — spread them across the 0-100 range based on the current list
@@ -82,6 +83,14 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     }
   }
 
+  // Fetch category boosts for this user
+  const boosts = await db.select().from(categoryBoosts)
+    .where(eq(categoryBoosts.userId, userId));
+  const boostMap: Record<string, number> = {};
+  for (const b of boosts) {
+    boostMap[b.category] = b.boost;
+  }
+
   // Fetch recent priority overrides for context
   const recentOverrides = await db.select().from(priorityOverrides)
     .where(eq(priorityOverrides.userId, userId))
@@ -109,6 +118,8 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     due_date: t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : null,
     recurring: t.recurrenceRule ?? undefined,
     assignee: t.assignee ?? undefined,
+    category: t.category ?? undefined,
+    category_boost: t.category ? (boostMap[t.category] ?? 0) : undefined,
     subtask_progress: subtaskProgress[t.id] ?? undefined,
     manual_priority: t.manualPriorityScore ?? undefined,
   }));
@@ -139,7 +150,12 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     for (const item of parsed) {
       const task = topLevel.find(t => t.id === item.id);
       // If task has manual override, use that instead
-      const score = task?.manualPriorityScore ?? Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
+      let baseScore = task?.manualPriorityScore ?? Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
+      // Apply category boost server-side as safety net
+      if (task?.category && boostMap[task.category] && !task.manualPriorityScore) {
+        baseScore = Math.min(100, Math.max(0, baseScore + boostMap[task.category]));
+      }
+      const score = baseScore;
       const reason = task?.manualPriorityReason ?? item.reason ?? 'Priority assessed by AI.';
       await db.update(tasks)
         .set({ priorityScore: score, priorityReason: reason, updatedAt: now })
@@ -161,7 +177,7 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
           .set({ priorityScore: task.manualPriorityScore, priorityReason: task.manualPriorityReason ?? 'Manual override.', updatedAt: new Date() })
           .where(eq(tasks.id, task.id));
       } else {
-        const { score, reason } = calculatePriorityFallback({
+        const { score: baseScore, reason } = calculatePriorityFallback({
           title: task.title,
           description: task.description,
           monetaryValue: task.monetaryValue,
@@ -170,6 +186,9 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
           strategicValue: task.strategicValue,
           dueDate: task.dueDate,
         });
+        // Apply category boost
+        const categoryBoost = task.category ? (boostMap[task.category] ?? 0) : 0;
+        const score = Math.min(100, Math.max(0, baseScore + categoryBoost));
         await db.update(tasks)
           .set({ priorityScore: score, priorityReason: reason, updatedAt: new Date() })
           .where(eq(tasks.id, task.id));

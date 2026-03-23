@@ -25,6 +25,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
   const [urgency, setUrgency] = useState(initialTask.urgency?.toString() ?? '');
   const [strategicValue, setStrategicValue] = useState(initialTask.strategicValue?.toString() ?? '');
   const [dueDate, setDueDate] = useState(initialTask.dueDate ? new Date(initialTask.dueDate).toISOString().split('T')[0] : '');
+  const [category, setCategory] = useState(initialTask.category ?? '');
   const [assignee, setAssignee] = useState(initialTask.assignee ?? '');
   const [recurrenceRule, setRecurrenceRule] = useState(initialTask.recurrenceRule ?? '');
   const [recurrenceDays, setRecurrenceDays] = useState<Set<number>>(
@@ -78,6 +79,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
       urgency: urgency ? parseInt(urgency) : null,
       strategicValue: strategicValue ? parseInt(strategicValue) : null,
       dueDate: dueDate || null,
+      category: category || null,
       assignee: assignee || null,
       recurrenceRule: recurrenceRule || null,
       recurrenceDays: recurrenceDays.size > 0 ? [...recurrenceDays].sort().join(',') : null,
@@ -282,6 +284,22 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
               />
             ) : (
               <p className="text-sm text-gray-600 whitespace-pre-wrap">{task.description || '—'}</p>
+            )}
+          </div>
+
+          {/* Category */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Category</label>
+            {editing ? (
+              <input
+                type="text"
+                value={category}
+                onChange={e => setCategory(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g. Temporal, Personal, Marketing"
+              />
+            ) : (
+              <p className="text-sm text-gray-700">{task.category || '—'}</p>
             )}
           </div>
 

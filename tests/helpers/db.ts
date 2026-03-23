@@ -31,6 +31,7 @@ export async function cleanupTestUser(userId: number) {
     await db.delete(schema.taskEvents).where(eq(schema.taskEvents.taskId, task.id));
   }
   await db.delete(schema.priorityOverrides).where(eq(schema.priorityOverrides.userId, userId));
+  await db.delete(schema.categoryBoosts).where(eq(schema.categoryBoosts.userId, userId));
   await db.delete(schema.tasks).where(eq(schema.tasks.userId, userId));
   await db.delete(schema.uploads).where(eq(schema.uploads.userId, userId));
   await db.delete(schema.users).where(eq(schema.users.id, userId));

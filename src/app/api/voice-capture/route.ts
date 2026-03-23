@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
           recurrenceRule: parsed.recurrence_rule ?? null,
           recurrenceDays: parsed.recurrence_days ?? null,
           assignee: parsed.assignee ?? null,
+          category: parsed.category ?? null,
         })
         .returning();
 

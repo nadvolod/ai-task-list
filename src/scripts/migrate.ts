@@ -108,6 +108,19 @@ async function migrate() {
     )
   `;
 
+  // Migration: task categories with priority boost (Issue #13)
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category TEXT`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS category_boosts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      category TEXT NOT NULL,
+      boost INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    )
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_category_boosts_user_category ON category_boosts(user_id, category)`;
+
   console.log('Migration complete!');
 }
 
