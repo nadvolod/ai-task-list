@@ -20,6 +20,7 @@ export default async function TasksPage() {
   const serialized = userTasks.map(t => ({
     ...t,
     dueDate: t.dueDate?.toISOString() ?? null,
+    recurrenceEndDate: t.recurrenceEndDate?.toISOString() ?? null,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
   }));

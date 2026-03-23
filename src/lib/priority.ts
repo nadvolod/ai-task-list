@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { db } from '@/lib/db';
-import { tasks } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { tasks, priorityOverrides } from '@/lib/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
 
 export interface PriorityInput {
   title?: string;
@@ -19,12 +19,14 @@ export interface PriorityResult {
   reason: string;
 }
 
-const REPRIORITIZE_PROMPT = `You are a CEO's task prioritization engine. You will receive a JSON array of ALL the user's active tasks. Score each task 0-100 RELATIVE to the others in the list.
+const REPRIORITIZE_PROMPT = `You are a CEO's task prioritization engine. You will receive a JSON array of ALL the user's active top-level tasks. Score each task 0-100 RELATIVE to the others in the list.
 
 RANKING PRINCIPLES:
 1. MONETARY VALUE is the primary factor. The task with the highest dollar amount (monetary_value or revenue_potential) should get the highest score. Spread scores proportionally — if one task is worth 75x more than another, that must be clearly reflected.
 2. URGENCY & DUE DATES are the tiebreaker. Among tasks with similar monetary value, overdue or imminent tasks rank higher.
 3. EFFORT is the final tiebreaker. Among tasks with similar value and urgency, quicker/easier tasks rank slightly higher (faster ROI).
+4. MANUAL OVERRIDES must be respected. If a task has a "manual_priority" field, use that exact score — do NOT change it. The user explicitly set it.
+5. Recurring tasks should not be penalized for being recurring. Treat each instance on its own merits.
 
 SCORING RULES:
 - Scores must be RELATIVE — spread them across the 0-100 range based on the current list
@@ -33,28 +35,70 @@ SCORING RULES:
 - Differentiate clearly: avoid giving similar scores to very different tasks
 - Today's date is {today}
 
+{overrideContext}
+
 Return ONLY a JSON array: [{ "id": number, "score": number, "reason": "one sentence" }]`;
 
 /**
  * Re-rank ALL active tasks for a user relative to each other.
- * Sends the full task list to the AI in one prompt so scores reflect relative importance.
+ * Only scores top-level tasks (not subtasks). Subtasks inherit parent's score.
  */
 export async function reprioritizeAllTasks(userId: number): Promise<void> {
-  const allTasks = await db
+  // Fetch ALL tasks (including done) for subtask progress, then filter for todo
+  const allTasksIncludingDone = await db
     .select()
     .from(tasks)
-    .where(and(eq(tasks.userId, userId), eq(tasks.status, 'todo')));
+    .where(eq(tasks.userId, userId));
 
-  if (allTasks.length === 0) return;
+  const allTodoTasks = allTasksIncludingDone.filter(t => t.status === 'todo');
+  if (allTodoTasks.length === 0) return;
 
-  if (allTasks.length === 1) {
+  // Separate top-level tasks from subtasks (only todo for scoring)
+  const topLevel = allTodoTasks.filter(t => t.parentId === null);
+  const subtasks = allTodoTasks.filter(t => t.parentId !== null);
+
+  if (topLevel.length === 0) return;
+
+  if (topLevel.length === 1) {
+    const score = topLevel[0].manualPriorityScore ?? 50;
     await db.update(tasks)
-      .set({ priorityScore: 50, priorityReason: 'Only active task.', updatedAt: new Date() })
-      .where(eq(tasks.id, allTasks[0].id));
+      .set({ priorityScore: score, priorityReason: topLevel[0].manualPriorityReason ?? 'Only active task.', updatedAt: new Date() })
+      .where(eq(tasks.id, topLevel[0].id));
+    for (const sub of subtasks.filter(s => s.parentId === topLevel[0].id)) {
+      await db.update(tasks)
+        .set({ priorityScore: score, priorityReason: 'Inherited from parent task.', updatedAt: new Date() })
+        .where(eq(tasks.id, sub.id));
+    }
     return;
   }
 
-  const taskList = allTasks.map(t => ({
+  // Count subtask progress for context (using ALL tasks including done)
+  const subtaskProgress: Record<number, string> = {};
+  for (const parent of topLevel) {
+    const children = allTasksIncludingDone.filter(t => t.parentId === parent.id);
+    if (children.length > 0) {
+      const done = children.filter(c => c.status === 'done').length;
+      subtaskProgress[parent.id] = `${done}/${children.length} subtasks done`;
+    }
+  }
+
+  // Fetch recent priority overrides for context
+  const recentOverrides = await db.select().from(priorityOverrides)
+    .where(eq(priorityOverrides.userId, userId))
+    .orderBy(desc(priorityOverrides.createdAt))
+    .limit(10);
+
+  let overrideContext = '';
+  if (recentOverrides.length > 0) {
+    const overrideLines = recentOverrides.map(o => {
+      const taskTitle = topLevel.find(t => t.id === o.taskId)?.title ?? `Task #${o.taskId}`;
+      const daysAgo = Math.round((Date.now() - new Date(o.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+      return `- "${taskTitle}" was manually set to ${o.newScore} because "${o.reason}" (${daysAgo} days ago)`;
+    });
+    overrideContext = `USER OVERRIDE HISTORY (respect these preferences):\n${overrideLines.join('\n')}`;
+  }
+
+  const taskList = topLevel.map(t => ({
     id: t.id,
     title: t.title,
     description: t.description,
@@ -63,12 +107,18 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     urgency: t.urgency,
     strategic_value: t.strategicValue,
     due_date: t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : null,
+    recurring: t.recurrenceRule ?? undefined,
+    assignee: t.assignee ?? undefined,
+    subtask_progress: subtaskProgress[t.id] ?? undefined,
+    manual_priority: t.manualPriorityScore ?? undefined,
   }));
 
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const today = new Date().toISOString().split('T')[0];
-    const prompt = REPRIORITIZE_PROMPT.replace('{today}', today);
+    const prompt = REPRIORITIZE_PROMPT
+      .replace('{today}', today)
+      .replace('{overrideContext}', overrideContext);
 
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -84,30 +134,53 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     const parsed: Array<{ id: number; score: number; reason: string }> = JSON.parse(jsonMatch?.[0] ?? '[]');
 
-    // Update each task
+    // Update each top-level task
     const now = new Date();
     for (const item of parsed) {
-      const score = Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
+      const task = topLevel.find(t => t.id === item.id);
+      // If task has manual override, use that instead
+      const score = task?.manualPriorityScore ?? Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
+      const reason = task?.manualPriorityReason ?? item.reason ?? 'Priority assessed by AI.';
       await db.update(tasks)
-        .set({ priorityScore: score, priorityReason: item.reason || 'Priority assessed by AI.', updatedAt: now })
+        .set({ priorityScore: score, priorityReason: reason, updatedAt: now })
         .where(and(eq(tasks.id, item.id), eq(tasks.userId, userId)));
+
+      // Inherit score to subtasks
+      for (const sub of subtasks.filter(s => s.parentId === item.id)) {
+        await db.update(tasks)
+          .set({ priorityScore: score, priorityReason: 'Inherited from parent task.', updatedAt: now })
+          .where(eq(tasks.id, sub.id));
+      }
     }
   } catch (err) {
     console.error('AI batch reprioritization failed, using fallback:', err);
-    // Fallback: score each task individually using local formula
-    for (const task of allTasks) {
-      const { score, reason } = calculatePriorityFallback({
-        title: task.title,
-        description: task.description,
-        monetaryValue: task.monetaryValue,
-        revenuePotential: task.revenuePotential,
-        urgency: task.urgency,
-        strategicValue: task.strategicValue,
-        dueDate: task.dueDate,
-      });
-      await db.update(tasks)
-        .set({ priorityScore: score, priorityReason: reason, updatedAt: new Date() })
-        .where(eq(tasks.id, task.id));
+    // Fallback: score each top-level task individually using local formula
+    for (const task of topLevel) {
+      if (task.manualPriorityScore != null) {
+        await db.update(tasks)
+          .set({ priorityScore: task.manualPriorityScore, priorityReason: task.manualPriorityReason ?? 'Manual override.', updatedAt: new Date() })
+          .where(eq(tasks.id, task.id));
+      } else {
+        const { score, reason } = calculatePriorityFallback({
+          title: task.title,
+          description: task.description,
+          monetaryValue: task.monetaryValue,
+          revenuePotential: task.revenuePotential,
+          urgency: task.urgency,
+          strategicValue: task.strategicValue,
+          dueDate: task.dueDate,
+        });
+        await db.update(tasks)
+          .set({ priorityScore: score, priorityReason: reason, updatedAt: new Date() })
+          .where(eq(tasks.id, task.id));
+      }
+      // Inherit to subtasks
+      const [updated] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+      for (const sub of subtasks.filter(s => s.parentId === task.id)) {
+        await db.update(tasks)
+          .set({ priorityScore: updated.priorityScore, priorityReason: 'Inherited from parent task.', updatedAt: new Date() })
+          .where(eq(tasks.id, sub.id));
+      }
     }
   }
 }

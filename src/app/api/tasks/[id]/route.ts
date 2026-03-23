@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { tasks } from '@/lib/db/schema';
+import { tasks, priorityOverrides } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
+import { spawnNextRecurringInstance } from '@/lib/task-operations';
 import { logger } from '@/lib/logger';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -67,22 +68,89 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const newUrgency = body.urgency !== undefined ? body.urgency : current.urgency;
     const newStrategic = body.strategicValue !== undefined ? body.strategicValue : current.strategicValue;
     const newDueDate = parsedDueDate !== undefined ? parsedDueDate : current.dueDate;
+    const newAssignee = body.assignee !== undefined ? body.assignee : current.assignee;
+    const newRecurrenceRule = body.recurrenceRule !== undefined ? body.recurrenceRule : current.recurrenceRule;
+    const newRecurrenceDays = body.recurrenceDays !== undefined ? body.recurrenceDays : current.recurrenceDays;
+    const newRecurrenceActive = body.recurrenceActive !== undefined ? body.recurrenceActive : current.recurrenceActive;
+
+    // Handle manual priority override (Issue #11)
+    // Handle manual priority override with validation
+    let newManualPriorityScore = current.manualPriorityScore;
+    let newManualPriorityReason = current.manualPriorityReason;
+    if (body.manualPriorityScore !== undefined) {
+      if (body.manualPriorityScore === null) {
+        newManualPriorityScore = null;
+      } else {
+        const parsed = Number(body.manualPriorityScore);
+        newManualPriorityScore = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
+      }
+      newManualPriorityReason = body.manualPriorityReason ?? null;
+
+      // Record the override in history (only for valid non-null scores)
+      if (newManualPriorityScore !== null) {
+        await db.insert(priorityOverrides).values({
+          taskId,
+          userId,
+          previousScore: current.priorityScore,
+          newScore: newManualPriorityScore,
+          reason: body.manualPriorityReason ?? 'Manual override',
+          source: body.overrideSource ?? 'manual',
+        });
+      }
+    }
+
+    const newStatus = body.status !== undefined ? body.status : current.status;
 
     await db
       .update(tasks)
       .set({
         title: newTitle,
         description: newDescription,
-        status: body.status !== undefined ? body.status : current.status,
+        status: newStatus,
         monetaryValue: newMonetary,
         revenuePotential: newRevenue,
         urgency: newUrgency,
         strategicValue: newStrategic,
         manualOrder: body.manualOrder !== undefined ? body.manualOrder : current.manualOrder,
         dueDate: newDueDate,
+        assignee: newAssignee,
+        recurrenceRule: newRecurrenceRule,
+        recurrenceDays: newRecurrenceDays,
+        recurrenceActive: newRecurrenceActive,
+        manualPriorityScore: newManualPriorityScore,
+        manualPriorityReason: newManualPriorityReason,
         updatedAt: new Date(),
       })
       .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
+
+    // Subtask cascade: marking parent done → complete all subtasks
+    if (body.status === 'done' && current.parentId === null) {
+      await db
+        .update(tasks)
+        .set({ status: 'done', updatedAt: new Date() })
+        .where(and(eq(tasks.parentId, taskId), eq(tasks.userId, userId)));
+    }
+
+    // Subtask cascade: check if completing last subtask → auto-complete parent
+    let parentAutoCompleted = false;
+    if (body.status === 'done' && current.parentId !== null) {
+      const siblings = await db.select().from(tasks)
+        .where(and(eq(tasks.parentId, current.parentId), eq(tasks.userId, userId)));
+      const allDone = siblings.every(s => s.id === taskId ? true : s.status === 'done');
+      if (allDone) {
+        await db.update(tasks)
+          .set({ status: 'done', updatedAt: new Date() })
+          .where(and(eq(tasks.id, current.parentId), eq(tasks.userId, userId)));
+        parentAutoCompleted = true;
+      }
+    }
+
+    // Recurring task: spawn next instance on completion (Issue #9)
+    let nextInstance = null;
+    if (body.status === 'done' && current.status !== 'done') {
+      const updatedCurrent = { ...current, dueDate: newDueDate };
+      nextInstance = await spawnNextRecurringInstance(updatedCurrent);
+    }
 
     await reprioritizeAllTasks(userId);
 
@@ -91,7 +159,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
 
     logger.info('Task updated', { taskId, userId, score: updated.priorityScore });
-    return NextResponse.json(updated);
+
+    const response: Record<string, unknown> = { ...updated };
+    if (parentAutoCompleted) response.parentAutoCompleted = true;
+    if (nextInstance) response.nextInstance = nextInstance;
+
+    return NextResponse.json(response);
   } catch (err) {
     logger.error('PATCH /api/tasks/:id failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

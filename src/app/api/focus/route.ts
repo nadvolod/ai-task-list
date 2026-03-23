@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 import OpenAI from 'openai';
 
@@ -15,10 +15,11 @@ export async function GET() {
     const userId = parseInt(session.user.id);
     logger.info('GET /api/focus', { userId });
 
+    // Efficient DB query: fetch only top-level todo tasks, ordered by priority, limited
     const topTasks = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.userId, userId), eq(tasks.status, 'todo')))
+      .where(and(eq(tasks.userId, userId), eq(tasks.status, 'todo'), isNull(tasks.parentId)))
       .orderBy(desc(tasks.priorityScore))
       .limit(5);
 
@@ -26,7 +27,23 @@ export async function GET() {
       return NextResponse.json({ tasks: [], summary: 'No pending tasks. Enjoy your free time!' });
     }
 
-    const focusTasks = topTasks.slice(0, 3);
+    // Fetch subtasks only for the focus tasks (all statuses for progress count)
+    const focusIds = topTasks.slice(0, 3).map(t => t.id);
+    const subtasksForFocus = focusIds.length > 0
+      ? await db.select().from(tasks).where(and(eq(tasks.userId, userId), inArray(tasks.parentId, focusIds)))
+      : [];
+
+    const focusTasks = topTasks.slice(0, 3).map(t => {
+      const children = subtasksForFocus.filter(c => c.parentId === t.id);
+      const subtaskTotal = children.length;
+      const subtaskDone = children.filter(c => c.status === 'done').length;
+      return {
+        ...t,
+        subtaskTotal,
+        subtaskDone,
+        subtaskProgress: subtaskTotal > 0 ? `${subtaskDone}/${subtaskTotal} done` : null,
+      };
+    });
 
     let summary: string;
     try {

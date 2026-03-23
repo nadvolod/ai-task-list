@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
@@ -60,7 +60,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    logger.info('POST /api/tasks', { userId, title: body.title });
+    // Validate parentId for subtask creation
+    let parentId: number | null = null;
+    let subtaskOrder: number | null = null;
+    if (body.parentId != null) {
+      parentId = parseInt(body.parentId);
+      if (isNaN(parentId)) {
+        return NextResponse.json({ error: 'parentId must be a valid number' }, { status: 400 });
+      }
+      const [parent] = await db.select().from(tasks)
+        .where(and(eq(tasks.id, parentId), eq(tasks.userId, userId)))
+        .limit(1);
+      if (!parent) {
+        return NextResponse.json({ error: 'Parent task not found' }, { status: 404 });
+      }
+      if (parent.parentId != null) {
+        return NextResponse.json({ error: 'Cannot nest subtasks more than one level deep' }, { status: 400 });
+      }
+      // Auto-set subtaskOrder to max+1 (handles gaps from deletions)
+      const [orderResult] = await db.select({
+        nextOrder: sql<number>`coalesce(max(${tasks.subtaskOrder}), -1) + 1`,
+      }).from(tasks)
+        .where(and(eq(tasks.parentId, parentId), eq(tasks.userId, userId)));
+      subtaskOrder = Number(orderResult.nextOrder);
+    }
+
+    // Validate recurrenceEndDate
+    let recurrenceEndDate: Date | null = null;
+    if (body.recurrenceEndDate) {
+      recurrenceEndDate = new Date(body.recurrenceEndDate);
+      if (isNaN(recurrenceEndDate.getTime())) {
+        return NextResponse.json({ error: 'recurrenceEndDate must be a valid date' }, { status: 400 });
+      }
+    }
+
+    // Validate recurrenceRule
+    const validRules = ['daily', 'weekly', 'biweekly', 'monthly'];
+    if (body.recurrenceRule && !validRules.includes(body.recurrenceRule)) {
+      return NextResponse.json({ error: 'recurrenceRule must be daily, weekly, biweekly, or monthly' }, { status: 400 });
+    }
+
+    logger.info('POST /api/tasks', { userId, title: body.title, parentId });
 
     const [task] = await db
       .insert(tasks)
@@ -75,6 +115,12 @@ export async function POST(req: NextRequest) {
         strategicValue: body.strategicValue,
         confidence: body.confidence,
         dueDate,
+        parentId,
+        subtaskOrder,
+        recurrenceRule: body.recurrenceRule ?? null,
+        recurrenceDays: body.recurrenceDays ?? null,
+        recurrenceEndDate,
+        assignee: body.assignee ?? null,
       })
       .returning();
 

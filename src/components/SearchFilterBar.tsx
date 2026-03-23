@@ -1,20 +1,21 @@
 'use client';
 
-export type FilterType = 'all' | 'today' | 'overdue' | 'high' | 'done';
+export type FilterType = 'all' | 'today' | 'overdue' | 'high' | 'recurring' | 'done';
 
 interface SearchFilterBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   activeFilter: FilterType;
   onFilterChange: (filter: FilterType) => void;
-  counts: { today: number; overdue: number; high: number };
+  counts: { today: number; overdue: number; high: number; recurring?: number };
 }
 
-const filters: { key: FilterType; label: string; countKey?: 'today' | 'overdue' | 'high' }[] = [
+const filters: { key: FilterType; label: string; countKey?: 'today' | 'overdue' | 'high' | 'recurring' }[] = [
   { key: 'all', label: 'All' },
   { key: 'today', label: 'Due Today', countKey: 'today' },
   { key: 'overdue', label: 'Overdue', countKey: 'overdue' },
   { key: 'high', label: 'High Priority', countKey: 'high' },
+  { key: 'recurring', label: 'Recurring', countKey: 'recurring' },
   { key: 'done', label: 'Done' },
 ];
 
@@ -66,7 +67,7 @@ export default function SearchFilterBar({
               }`}
             >
               {f.label}
-              {f.countKey && count > 0 && (
+              {f.countKey && (count ?? 0) > 0 && (
                 <span className={`ml-1 ${isActive ? 'text-blue-200' : 'text-gray-400'}`}>
                   {count}
                 </span>

@@ -15,13 +15,23 @@ function getGeminiClient() {
  * Extract task list items from an image using Google Gemini vision.
  * Returns an array of task strings.
  */
+export interface ExtractedTask {
+  title: string;
+  confidence: number;
+  subtasks?: Array<{ title: string; confidence: number }>;
+  recurrence_rule?: string;
+  recurrence_days?: string;
+  due_date?: string;
+}
+
 export async function extractTasksFromImage(
   base64Image: string,
   mimeType: string
-): Promise<{ tasks: Array<{ title: string; confidence: number }>; rawText: string }> {
+): Promise<{ tasks: ExtractedTask[]; rawText: string }> {
   const gemini = getGeminiClient();
   const model = gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
+  const today = new Date().toISOString().split('T')[0];
   const result = await model.generateContent([
     {
       inlineData: {
@@ -34,11 +44,29 @@ export async function extractTasksFromImage(
 {
   "raw_text": "the full extracted text",
   "tasks": [
-    { "title": "Task description", "confidence": 0.9 }
+    {
+      "title": "Task description",
+      "confidence": 0.9,
+      "subtasks": [
+        { "title": "Sub-item description", "confidence": 0.9 }
+      ],
+      "recurrence_rule": "weekly",
+      "recurrence_days": "1",
+      "due_date": "YYYY-MM-DD"
+    }
   ]
 }
 Rules:
-- Each task should be a separate item.
+- Each top-level task should be a separate item.
+- Detect hierarchy: indented items, bullet sub-items, or numbered sub-lists are SUBTASKS of the parent item above them.
+- Parent tasks (headers, non-indented, bold, or colon-terminated items) contain their subtasks in a "subtasks" array.
+- Items without subtasks should have an empty "subtasks" array or omit the field.
+- Only support one level of nesting (subtasks cannot have their own subtasks).
+- Detect recurring task patterns. Look for words like "every", "weekly", "daily", "monthly", "each Monday", "recurring", etc.
+- If a task is recurring, set recurrence_rule to one of: "daily", "weekly", "biweekly", "monthly". Otherwise omit it.
+- For weekly tasks on specific days, set recurrence_days as comma-separated ISO weekday numbers (1=Mon through 7=Sun).
+- If a task is recurring and no explicit due date, set due_date to the next occurrence from today (${today}).
+- If a group of tasks share recurrence context (e.g., a list titled "Weekly Tasks"), apply that recurrence to all tasks.
 - Preserve the user's wording as closely as possible.
 - Clean up obvious OCR noise (stray characters, garbled words).
 - Do not add tasks that are not in the image.
@@ -153,7 +181,7 @@ Interpret context clues:
 export type VoiceIntent =
   | { intent: 'create_tasks'; tasks: VoiceCapturedTask[] }
   | { intent: 'complete_task'; task_query: string }
-  | { intent: 'update_task'; task_query: string; updates: { title?: string; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string } }
+  | { intent: 'update_task'; task_query: string; updates: { title?: string; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string } }
   | { intent: 'delete_task'; task_query: string }
   | { intent: 'delete_all_tasks' }
   | { intent: 'query_briefing' }
@@ -205,8 +233,8 @@ INTENTS:
 2. complete_task — User wants to mark a task as done
    {"intent":"complete_task","task_query":"search string to match task title"}
 
-3. update_task — User wants to change a task's details (due date, urgency, etc.)
-   {"intent":"update_task","task_query":"search string","updates":{"due_date":"YYYY-MM-DD","urgency":N,...}}
+3. update_task — User wants to change a task's details (due date, urgency, assignee, priority, recurrence, etc.)
+   {"intent":"update_task","task_query":"search string","updates":{"due_date":"YYYY-MM-DD","urgency":N,"assignee":"person name","priority_override":0-100,"priority_reason":"why","recurrence_rule":"weekly","recurrence_days":"1,3",...}}
 
 4. delete_task — User wants to remove a specific task
    {"intent":"delete_task","task_query":"search string to match task title"}
@@ -235,7 +263,12 @@ MATCHING RULES:
 - "mark it done" without specifying which task → ask by returning unknown with helpful raw_text
 - If the user says something that could be a new task OR a command, prefer the command interpretation if it matches an existing task
 - "by Friday" "next week" "tomorrow" → convert to ISO dates for due_date
-- Multiple new tasks in one utterance → create_tasks with multiple items in the array`,
+- Multiple new tasks in one utterance → create_tasks with multiple items in the array
+- "assign X to Y" or "Y is responsible for X" → update_task with updates.assignee
+- "make X my top priority" or "X is the most important" → update_task with priority_override: 95, priority_reason explaining why
+- "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"
+- "this should be higher priority because..." → update_task with priority_override and priority_reason
+- Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low`,
       },
       {
         role: 'user',
@@ -284,6 +317,10 @@ export interface VoiceCapturedTask {
   urgency?: number;
   strategic_value?: number;
   due_date?: string;
+  subtasks?: Array<{ title: string; description?: string }>;
+  recurrence_rule?: string;
+  recurrence_days?: string;
+  assignee?: string;
 }
 
 /**
@@ -318,7 +355,11 @@ export async function transcribeAndCreateTasks(
   "revenue_potential": number or null,
   "urgency": 1-10 or null,
   "strategic_value": 1-10 or null,
-  "due_date": "YYYY-MM-DD" or null
+  "due_date": "YYYY-MM-DD" or null,
+  "subtasks": [{"title": "sub-item title", "description": "context"}] or null,
+  "recurrence_rule": "daily"|"weekly"|"biweekly"|"monthly" or null,
+  "recurrence_days": "1,3,5" or null,
+  "assignee": "person name" or null
 }]
 
 Today's date is ${new Date().toISOString().split('T')[0]}.
@@ -327,6 +368,9 @@ Rules:
 - Split multiple tasks mentioned in one utterance into separate items
 - "Call John about the 500K deal, it's urgent, due Friday" → one task with title, monetary_value=500000, urgency=8, due_date=next Friday
 - "I need to review the Q3 budget and also schedule the board meeting for next month" → two separate tasks
+- If user mentions sub-items ("which involves A, B, and C" or "I need to do X: first A, then B, then C"), structure as parent task with subtasks array
+- Detect recurring patterns: "every Monday", "weekly standup", "daily check-in" → set recurrence_rule and recurrence_days (1=Mon..7=Sun)
+- "assign this to Sarah" or "Sarah needs to handle this" → set assignee
 - Interpret "urgent"/"ASAP" as urgency 8-9
 - Interpret relative dates: "tomorrow", "Friday", "next week", "end of month"
 - Keep titles concise and actionable

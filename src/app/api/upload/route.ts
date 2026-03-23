@@ -50,33 +50,59 @@ export async function POST(req: NextRequest) {
       .values({ userId, extractedText: rawText })
       .returning();
 
-    // Insert tasks first (without scores), then reprioritize all at once
-    const taskValues = cappedTasks.map(item => ({
-      userId,
-      title: item.title,
-      sourceType: 'image_upload' as const,
-      confidence: item.confidence,
-    }));
+    // Two-pass insert: parent tasks first, then subtasks with parentId linking
+    const allCreatedIds: number[] = [];
+    let subtaskCount = 0;
 
-    const createdTasks = taskValues.length > 0
-      ? await db.insert(tasks).values(taskValues).returning()
-      : [];
+    // Pass 1: Insert parent/top-level tasks
+    for (const item of cappedTasks) {
+      const dueDate = item.due_date ? new Date(item.due_date) : null;
+      const [parent] = await db.insert(tasks).values({
+        userId,
+        title: item.title,
+        sourceType: 'image_upload' as const,
+        confidence: item.confidence,
+        dueDate: dueDate && !isNaN(dueDate.getTime()) ? dueDate : null,
+        recurrenceRule: item.recurrence_rule ?? null,
+        recurrenceDays: item.recurrence_days ?? null,
+      }).returning();
+      allCreatedIds.push(parent.id);
+
+      // Pass 2: Insert subtasks for this parent
+      if (item.subtasks && item.subtasks.length > 0) {
+        for (let i = 0; i < item.subtasks.length; i++) {
+          const sub = item.subtasks[i];
+          if (!sub.title || !sub.title.trim()) continue; // skip empty subtask titles
+          const [child] = await db.insert(tasks).values({
+            userId,
+            title: sub.title,
+            sourceType: 'image_upload' as const,
+            confidence: sub.confidence,
+            parentId: parent.id,
+            subtaskOrder: i,
+            recurrenceRule: item.recurrence_rule ?? null,
+            recurrenceDays: item.recurrence_days ?? null,
+          }).returning();
+          allCreatedIds.push(child.id);
+          subtaskCount++;
+        }
+      }
+    }
 
     // Re-rank all tasks relative to each other (including the new ones)
-    if (createdTasks.length > 0) {
+    if (allCreatedIds.length > 0) {
       await reprioritizeAllTasks(userId);
     }
 
     // Re-fetch to get updated priority scores
-    const taskIds = createdTasks.map(t => t.id);
-    const updatedTasks = taskIds.length > 0
+    const updatedTasks = allCreatedIds.length > 0
       ? await db.select().from(tasks).where(
-          and(eq(tasks.userId, userId), inArray(tasks.id, taskIds))
+          and(eq(tasks.userId, userId), inArray(tasks.id, allCreatedIds))
         )
       : [];
 
-    logger.info('Upload complete', { uploadId: upload.id, tasksCreated: updatedTasks.length });
-    return NextResponse.json({ uploadId: upload.id, tasks: updatedTasks });
+    logger.info('Upload complete', { uploadId: upload.id, tasksCreated: updatedTasks.length, subtasks: subtaskCount });
+    return NextResponse.json({ uploadId: upload.id, tasks: updatedTasks, subtaskCount });
   } catch (err) {
     logger.error('POST /api/upload failed', { error: (err as Error).message });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

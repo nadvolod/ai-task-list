@@ -77,6 +77,37 @@ async function migrate() {
     END $$
   `;
 
+  // Migration: subtask support (Issue #10)
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS subtask_order INTEGER`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id)`;
+
+  // Migration: recurrence support (Issue #9)
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_rule TEXT`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_days TEXT`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_end_date TIMESTAMP`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_parent_id INTEGER`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_active TEXT DEFAULT 'true'`;
+
+  // Migration: assignee & priority override (Issue #11)
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignee TEXT`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS manual_priority_score REAL`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS manual_priority_reason TEXT`;
+
+  // Migration: priority overrides tracking table (Issue #11)
+  await sql`
+    CREATE TABLE IF NOT EXISTS priority_overrides (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      previous_score REAL,
+      new_score REAL,
+      reason TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'voice',
+      created_at TIMESTAMP DEFAULT NOW() NOT NULL
+    )
+  `;
+
   console.log('Migration complete!');
 }
 

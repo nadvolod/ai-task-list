@@ -2,8 +2,8 @@
  * End-to-end tests for the upload flow.
  * Hits real Gemini API for image extraction and real OpenAI API for priority scoring.
  * No AI mocks — only auth is mocked (as required by the test harness).
- * Requires GOOGLE_API_KEY and OPENAI_API_KEY in .env.local.
- * Skipped in CI when GOOGLE_API_KEY is not available.
+ * Requires GOOGLE_API_KEY and OPENAI_API_KEY in .env.local and CI secrets.
+ * Tests FAIL if keys are missing — never skip.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -13,8 +13,6 @@ import { eq } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 
-const hasGoogleKey = !!process.env.GOOGLE_API_KEY;
-
 const { POST } = await import('../../src/app/api/upload/route');
 
 const FIXTURE_PATH = path.join(__dirname, '..', 'fixtures', 'test-tasks.png');
@@ -22,17 +20,21 @@ const FIXTURE_PATH = path.join(__dirname, '..', 'fixtures', 'test-tasks.png');
 let testUserId: number;
 
 beforeAll(async () => {
-  if (!hasGoogleKey) return;
+  if (!process.env.GOOGLE_API_KEY) {
+    throw new Error('GOOGLE_API_KEY is required. Set it in .env.local or CI secrets.');
+  }
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required. Set it in .env.local or CI secrets.');
+  }
   const user = await createTestUser('upload-e2e');
   testUserId = user.userId;
 });
 
 afterAll(async () => {
-  if (!hasGoogleKey) return;
   await cleanupTestUser(testUserId);
 });
 
-describe.skipIf(!hasGoogleKey)('POST /api/upload (e2e — real AI APIs)', () => {
+describe('POST /api/upload (e2e — real AI APIs)', () => {
   beforeEach(() => mockSession(testUserId));
 
   it('extracts tasks from image and creates them in the database with AI priority scores', async () => {
