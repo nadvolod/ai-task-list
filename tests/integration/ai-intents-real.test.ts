@@ -77,7 +77,10 @@ INTENTS:
 9. undo_complete — User wants to reopen a completed task
    {"intent":"undo_complete","task_query":"search string"}
 
-10. unknown — Can't determine intent
+10. start_task — User is working on a task ("I'm working on X", "started X", "X is in progress")
+   {"intent":"start_task","task_query":"search string"}
+
+11. unknown — Can't determine intent
    {"intent":"unknown","raw_text":"original text"}
 
 MATCHING RULES:
@@ -91,6 +94,7 @@ MATCHING RULES:
 - "make X my top priority" or "X is the most important" → update_task with priority_override: 95, priority_reason explaining why
 - "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"
 - "this should be higher priority because..." → update_task with priority_override and priority_reason
+- "I'm working on X" or "I started X" or "X is in progress" → start_task
 - Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low`,
       },
       { role: 'user', content: text },
@@ -209,5 +213,33 @@ describe('Real OpenAI intent classification — recurrence', () => {
     expect(intent.task_query.toLowerCase()).toContain('budget');
     expect(intent.updates).toBeDefined();
     expect(intent.updates.recurrence_rule).toBe('monthly');
+  }, 30_000);
+});
+
+describe('Real OpenAI intent classification — start_task', () => {
+  beforeAll(() => {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is required. Set it in .env.local or CI secrets.');
+    }
+  });
+
+  it('classifies "I\'m working on the budget review" as start_task', async () => {
+    const intent = await classifyText(
+      "I'm working on the budget review",
+      existingTasks
+    );
+
+    expect(intent.intent).toBe('start_task');
+    expect(intent.task_query.toLowerCase()).toContain('budget');
+  }, 30_000);
+
+  it('classifies "I started the Q3 forecast" as start_task', async () => {
+    const intent = await classifyText(
+      'I started the Q3 forecast',
+      existingTasks
+    );
+
+    expect(intent.intent).toBe('start_task');
+    expect(intent.task_query.toLowerCase()).toContain('q3');
   }, 30_000);
 });

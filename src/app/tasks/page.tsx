@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import TaskListClient from './TaskListClient';
+import type { Task } from '@/types/task';
 
 export default async function TasksPage() {
   const session = await getServerSession(authOptions);
@@ -19,6 +20,7 @@ export default async function TasksPage() {
 
   const serialized = userTasks.map(t => ({
     ...t,
+    status: t.status as Task['status'],
     dueDate: t.dueDate?.toISOString() ?? null,
     recurrenceEndDate: t.recurrenceEndDate?.toISOString() ?? null,
     createdAt: t.createdAt.toISOString(),

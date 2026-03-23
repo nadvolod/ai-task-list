@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { db } from '@/lib/db';
 import { tasks, priorityOverrides, categoryBoosts } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
+import { logger } from '@/lib/logger';
 
 export interface PriorityInput {
   title?: string;
@@ -34,11 +35,77 @@ SCORING RULES:
 - The most important task should score 90-100
 - The least important should score 10-30
 - Differentiate clearly: avoid giving similar scores to very different tasks
+- If two tasks differ by more than 5x in monetary value, the higher-value task MUST score higher. No exceptions.
 - Today's date is {today}
+
+EXAMPLE: Given "Contract worth $1,000,000" and "Task worth $12,000", the $1M task MUST score at least 20 points higher. A task worth 10x more should score at least 15 points higher than the lower-value task.
 
 {overrideContext}
 
 Return ONLY a JSON array: [{ "id": number, "score": number, "reason": "one sentence" }]`;
+
+/**
+ * Post-AI correction: enforce that higher monetary value => higher score.
+ * Walks tasks sorted by dollar amount descending and raises scores where
+ * the monetary ordering invariant is violated.
+ * Manual overrides are skipped (they always win).
+ */
+export function enforceMonetaryOrdering(
+  scored: Array<{ id: number; score: number; reason: string }>,
+  taskDetails: Array<{ id: number; monetaryValue: number | null; revenuePotential: number | null; manualPriorityScore: number | null }>
+): Array<{ id: number; score: number; reason: string }> {
+  const scoreMap = new Map(scored.map(s => [s.id, { ...s }]));
+
+  // Build list of tasks that have monetary value and no manual override
+  const withMoney = taskDetails
+    .filter(t => t.manualPriorityScore == null)
+    .map(t => ({
+      id: t.id,
+      dollars: Math.max(t.monetaryValue ?? 0, t.revenuePotential ?? 0),
+    }))
+    .filter(t => t.dollars > 0)
+    .sort((a, b) => b.dollars - a.dollars); // highest first
+
+  if (withMoney.length < 2) return scored;
+
+  // Walk from second-highest down, enforcing that higher $ => higher score
+  for (let i = 1; i < withMoney.length; i++) {
+    const higher = withMoney[i - 1];
+    const lower = withMoney[i];
+    const higherEntry = scoreMap.get(higher.id);
+    const lowerEntry = scoreMap.get(lower.id);
+    if (!higherEntry || !lowerEntry) continue;
+
+    // Skip if same dollar amount — keep AI ordering for equal values
+    if (higher.dollars === lower.dollars) continue;
+
+    // If higher-value task scored lower, fix it
+    if (higherEntry.score < lowerEntry.score) {
+      const valueRatio = higher.dollars / lower.dollars;
+      const minGap = valueRatio > 5 ? 5 : 2;
+      const newScore = Math.min(100, lowerEntry.score + minGap);
+      logger.info('Monetary ordering correction applied', {
+        taskId: higher.id, before: higherEntry.score, after: newScore,
+        higherDollars: higher.dollars, lowerDollars: lower.dollars,
+      });
+      higherEntry.score = newScore;
+    }
+
+    // Ensure minimum gap for large value differences
+    if (higher.dollars / lower.dollars > 5 && higherEntry.score - lowerEntry.score < 5) {
+      const newScore = Math.min(100, lowerEntry.score + 5);
+      if (newScore > higherEntry.score) {
+        logger.info('Monetary ordering correction applied', {
+          taskId: higher.id, before: higherEntry.score, after: newScore,
+          reason: 'enforcing minimum 5-point gap for >5x value ratio',
+        });
+        higherEntry.score = newScore;
+      }
+    }
+  }
+
+  return scored.map(s => scoreMap.get(s.id) ?? s);
+}
 
 /**
  * Re-rank ALL active tasks for a user relative to each other.
@@ -51,7 +118,7 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     .from(tasks)
     .where(eq(tasks.userId, userId));
 
-  const allTodoTasks = allTasksIncludingDone.filter(t => t.status === 'todo');
+  const allTodoTasks = allTasksIncludingDone.filter(t => t.status !== 'done');
   if (allTodoTasks.length === 0) return;
 
   // Separate top-level tasks from subtasks (only todo for scoring)
@@ -143,7 +210,16 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
 
     const content = response.choices[0]?.message?.content ?? '[]';
     const jsonMatch = content.match(/\[[\s\S]*\]/);
-    const parsed: Array<{ id: number; score: number; reason: string }> = JSON.parse(jsonMatch?.[0] ?? '[]');
+    const rawParsed: Array<{ id: number; score: number; reason: string }> = JSON.parse(jsonMatch?.[0] ?? '[]');
+
+    // Post-AI correction: enforce monetary value ordering
+    let parsed: Array<{ id: number; score: number; reason: string }>;
+    try {
+      parsed = enforceMonetaryOrdering(rawParsed, topLevel);
+    } catch (err) {
+      logger.error('enforceMonetaryOrdering failed, using uncorrected scores', { error: (err as Error).message });
+      parsed = rawParsed;
+    }
 
     // Update each top-level task
     const now = new Date();
@@ -214,12 +290,12 @@ export function calculatePriorityFallback(input: PriorityInput): PriorityResult 
   const reasons: string[] = [];
   let score = 0;
 
-  // Monetary value dominates — log scale so $75K >> $1K (max ~50 points)
+  // Monetary value dominates — log scale so $75K >> $1K (max ~60 points)
   const mv = Math.max(input.monetaryValue ?? 0, 0);
   const rp = Math.max(input.revenuePotential ?? 0, 0);
   const maxDollar = Math.max(mv, rp);
   if (maxDollar > 0) {
-    score += Math.min(Math.log10(maxDollar) * 10, 50);
+    score += Math.min(Math.log10(maxDollar) * 12, 60);
     if (mv > 0) reasons.push(`protects or involves $${mv.toLocaleString()}`);
     if (rp > 0) reasons.push(`could generate $${rp.toLocaleString()} in revenue`);
   }

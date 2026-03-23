@@ -280,3 +280,97 @@ describe('DELETE /api/tasks/:id', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('PATCH /api/tasks/:id - status workflow', () => {
+  let taskId: number;
+
+  beforeAll(async () => {
+    mockSession(testUserId);
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Status workflow task' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    const data = await res.json();
+    taskId = data.id;
+  });
+
+  beforeEach(() => mockSession(testUserId));
+
+  it('sets status to doing', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'doing' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('doing');
+  });
+
+  it('cycles doing to done', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'done' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('done');
+  });
+
+  it('cycles done back to todo', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'todo' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('todo');
+  });
+
+  it('rejects invalid status with 400', async () => {
+    const req = new NextRequest(`http://localhost/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'invalid' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: String(taskId) }) });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toContain('doing');
+  });
+});
+
+describe('POST /api/tasks - default assignee', () => {
+  beforeEach(() => mockSession(testUserId, 'nikolay@example.com'));
+
+  it('defaults assignee to email prefix when not provided', async () => {
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Assignee default test' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.assignee).toBe('Nikolay');
+  });
+
+  it('uses explicit assignee when provided', async () => {
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Explicit assignee test', assignee: 'Sarah' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.assignee).toBe('Sarah');
+  });
+});
