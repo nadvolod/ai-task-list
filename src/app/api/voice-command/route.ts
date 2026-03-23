@@ -6,6 +6,8 @@ import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent } from '@/lib/ai';
 import { reprioritizeAllTasks } from '@/lib/priority';
+import { spawnNextRecurringInstance } from '@/app/api/tasks/[id]/route';
+import { priorityOverrides } from '@/lib/db/schema';
 import { logger } from '@/lib/logger';
 
 interface TaskRow {
@@ -20,6 +22,15 @@ interface TaskRow {
   strategicValue: number | null;
   dueDate: Date | null;
   description: string | null;
+  parentId: number | null;
+  recurrenceRule: string | null;
+  recurrenceDays: string | null;
+  recurrenceEndDate: Date | null;
+  recurrenceParentId: number | null;
+  recurrenceActive: string | null;
+  assignee: string | null;
+  manualPriorityScore: number | null;
+  manualPriorityReason: string | null;
 }
 
 function fuzzyMatch(query: string, tasks: TaskRow[]): TaskRow | null {
@@ -195,17 +206,35 @@ async function executeIntent(
         };
       }
 
+      // Fetch full task record for recurring spawn
+      const [fullTask] = await db.select().from(tasks).where(eq(tasks.id, match.id));
+
       const [updated] = await db.update(tasks)
         .set({ status: 'done', updatedAt: new Date() })
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
         .returning();
 
+      // Spawn next instance if recurring
+      const nextInstance = await spawnNextRecurringInstance(fullTask);
+
+      // Also complete subtasks if this is a parent task
+      if (fullTask.parentId === null) {
+        await db.update(tasks)
+          .set({ status: 'done', updatedAt: new Date() })
+          .where(and(eq(tasks.parentId, match.id), eq(tasks.userId, userId)));
+      }
+
       await reprioritizeAllTasks(userId);
 
       const remaining = pendingTasks.length - 1;
+      let spoken = `Done! Marked "${match.title}" as complete. ${remaining} tasks remaining.`;
+      if (nextInstance) {
+        const nextDue = nextInstance.dueDate ? new Date(nextInstance.dueDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'soon';
+        spoken += ` Next occurrence scheduled for ${nextDue}.`;
+      }
       return {
         action: 'completed',
-        spokenResponse: `Done! Marked "${match.title}" as complete. ${remaining} tasks remaining.`,
+        spokenResponse: spoken,
         taskUpdated: updated,
       };
     }
@@ -273,6 +302,33 @@ async function executeIntent(
       if (intent.updates.description) {
         updates.description = intent.updates.description;
         changes.push('description');
+      }
+      if (intent.updates.assignee) {
+        updates.assignee = intent.updates.assignee;
+        changes.push(`assigned to ${intent.updates.assignee}`);
+      }
+      if (intent.updates.recurrence_rule) {
+        updates.recurrenceRule = intent.updates.recurrence_rule;
+        if (intent.updates.recurrence_days) {
+          updates.recurrenceDays = intent.updates.recurrence_days;
+        }
+        changes.push(`set to recurring: ${intent.updates.recurrence_rule}`);
+      }
+      if (intent.updates.priority_override != null) {
+        const score = Math.min(100, Math.max(0, Math.round(intent.updates.priority_override)));
+        updates.manualPriorityScore = score;
+        updates.manualPriorityReason = intent.updates.priority_reason ?? 'Set via voice command';
+        changes.push(`priority manually set to ${score}`);
+
+        // Record in priority override history
+        await db.insert(priorityOverrides).values({
+          taskId: match.id,
+          userId,
+          previousScore: match.priorityScore,
+          newScore: score,
+          reason: intent.updates.priority_reason ?? 'Set via voice command',
+          source: 'voice',
+        });
       }
 
       await db.update(tasks)

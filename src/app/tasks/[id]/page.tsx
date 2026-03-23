@@ -26,6 +26,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const serialized = {
     ...task,
     dueDate: task.dueDate?.toISOString() ?? null,
+    recurrenceEndDate: task.recurrenceEndDate?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };

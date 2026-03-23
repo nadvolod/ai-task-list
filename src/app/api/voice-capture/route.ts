@@ -59,6 +59,9 @@ export async function POST(req: NextRequest) {
           urgency,
           strategicValue,
           dueDate,
+          recurrenceRule: parsed.recurrence_rule ?? null,
+          recurrenceDays: parsed.recurrence_days ?? null,
+          assignee: parsed.assignee ?? null,
         })
         .returning();
 
@@ -68,6 +71,22 @@ export async function POST(req: NextRequest) {
         rawInput: transcription,
         parsedOutput: parsed,
       });
+
+      // Create subtasks if present
+      if (parsed.subtasks && parsed.subtasks.length > 0) {
+        for (let i = 0; i < parsed.subtasks.length; i++) {
+          const sub = parsed.subtasks[i];
+          if (!sub.title?.trim()) continue;
+          await db.insert(tasks).values({
+            userId,
+            title: sub.title.trim(),
+            description: sub.description || null,
+            sourceType: 'voice_context',
+            parentId: task.id,
+            subtaskOrder: i,
+          });
+        }
+      }
 
       createdTasks.push(task);
     }

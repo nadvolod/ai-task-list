@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
@@ -60,7 +60,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    logger.info('POST /api/tasks', { userId, title: body.title });
+    // Validate parentId for subtask creation
+    let parentId: number | null = null;
+    let subtaskOrder: number | null = null;
+    if (body.parentId != null) {
+      parentId = parseInt(body.parentId);
+      if (isNaN(parentId)) {
+        return NextResponse.json({ error: 'parentId must be a valid number' }, { status: 400 });
+      }
+      const [parent] = await db.select().from(tasks)
+        .where(and(eq(tasks.id, parentId), eq(tasks.userId, userId)))
+        .limit(1);
+      if (!parent) {
+        return NextResponse.json({ error: 'Parent task not found' }, { status: 404 });
+      }
+      if (parent.parentId != null) {
+        return NextResponse.json({ error: 'Cannot nest subtasks more than one level deep' }, { status: 400 });
+      }
+      // Auto-set subtaskOrder to append at end
+      const [countResult] = await db.select({ count: sql<number>`count(*)` }).from(tasks)
+        .where(eq(tasks.parentId, parentId));
+      subtaskOrder = Number(countResult.count);
+    }
+
+    logger.info('POST /api/tasks', { userId, title: body.title, parentId });
 
     const [task] = await db
       .insert(tasks)
@@ -75,6 +98,14 @@ export async function POST(req: NextRequest) {
         strategicValue: body.strategicValue,
         confidence: body.confidence,
         dueDate,
+        parentId,
+        subtaskOrder,
+        // Recurrence fields (Issue #9)
+        recurrenceRule: body.recurrenceRule ?? null,
+        recurrenceDays: body.recurrenceDays ?? null,
+        recurrenceEndDate: body.recurrenceEndDate ? new Date(body.recurrenceEndDate) : null,
+        // Assignee (Issue #11)
+        assignee: body.assignee ?? null,
       })
       .returning();
 

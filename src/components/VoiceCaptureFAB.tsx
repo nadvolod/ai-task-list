@@ -1,22 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-
-interface Task {
-  id: number;
-  title: string;
-  description: string | null;
-  status: string;
-  priorityScore: number;
-  priorityReason: string | null;
-  monetaryValue: number | null;
-  revenuePotential: number | null;
-  urgency: number | null;
-  strategicValue: number | null;
-  confidence: number | null;
-  sourceType: string;
-  dueDate: string | null;
-}
+import type { Task } from '@/types/task';
 
 interface VoiceCommandResponse {
   transcription: string;

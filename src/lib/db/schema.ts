@@ -31,8 +31,32 @@ export const tasks = pgTable('tasks', {
   manualOrder: integer('manual_order'),
   confidence: real('confidence'), // 0-1
   dueDate: timestamp('due_date'),
+  // Subtask support (Issue #10) — FK constraint added via migration
+  parentId: integer('parent_id'),
+  subtaskOrder: integer('subtask_order'),
+  // Recurrence support (Issue #9)
+  recurrenceRule: text('recurrence_rule'), // 'daily' | 'weekly' | 'biweekly' | 'monthly' | null
+  recurrenceDays: text('recurrence_days'), // comma-separated ISO weekdays: "1,3,5"
+  recurrenceEndDate: timestamp('recurrence_end_date'),
+  recurrenceParentId: integer('recurrence_parent_id'), // links instances in a recurrence chain
+  recurrenceActive: text('recurrence_active').default('true'),
+  // Assignee & priority override (Issue #11)
+  assignee: text('assignee'),
+  manualPriorityScore: real('manual_priority_score'),
+  manualPriorityReason: text('manual_priority_reason'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const priorityOverrides = pgTable('priority_overrides', {
+  id: serial('id').primaryKey(),
+  taskId: integer('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id),
+  previousScore: real('previous_score'),
+  newScore: real('new_score'),
+  reason: text('reason').notNull(),
+  source: text('source').notNull().default('voice'), // 'voice' | 'manual'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 export const taskEvents = pgTable('task_events', {
