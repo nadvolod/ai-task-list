@@ -1,18 +1,22 @@
 /**
  * Real integration tests for image extraction via Gemini API.
  * These tests hit the actual Google Gemini API — no mocks.
- * Requires GOOGLE_API_KEY to be set in .env.local.
- * Skipped in CI when the key is not available.
+ * Requires GOOGLE_API_KEY to be set in .env.local and CI secrets.
+ * Tests FAIL if the key is missing — never skip.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { extractTasksFromImage } from '../../src/lib/ai';
 import fs from 'fs';
 import path from 'path';
 
 const FIXTURE_PATH = path.join(__dirname, '..', 'fixtures', 'test-tasks.png');
-const hasGoogleKey = !!process.env.GOOGLE_API_KEY;
 
-describe.skipIf(!hasGoogleKey)('extractTasksFromImage (real Gemini API)', () => {
+describe('extractTasksFromImage (real Gemini API)', () => {
+  beforeAll(() => {
+    if (!process.env.GOOGLE_API_KEY) {
+      throw new Error('GOOGLE_API_KEY is required. Set it in .env.local or CI secrets.');
+    }
+  });
   it('extracts tasks from a PNG image with a to-do list', async () => {
     const imageBuffer = fs.readFileSync(FIXTURE_PATH);
     const base64 = imageBuffer.toString('base64');

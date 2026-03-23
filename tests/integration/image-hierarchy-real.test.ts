@@ -4,14 +4,12 @@
  * from indented/bulleted list images.
  *
  * These tests call the REAL Google Gemini API — no mocks.
- * Requires GOOGLE_API_KEY in .env.local.
- * Skipped in CI when the key is not available.
+ * Requires GOOGLE_API_KEY in .env.local and CI secrets.
+ * Tests FAIL if the key is missing — never skip.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { extractTasksFromImage } from '../../src/lib/ai';
 import sharp from 'sharp';
-
-const hasGoogleKey = !!process.env.GOOGLE_API_KEY;
 
 /**
  * Generate a PNG image containing hierarchical text (parent tasks + indented subtasks).
@@ -47,7 +45,12 @@ async function createHierarchicalTaskImage(): Promise<string> {
   return pngBuffer.toString('base64');
 }
 
-describe.skipIf(!hasGoogleKey)('extractTasksFromImage — hierarchy detection (real Gemini API)', () => {
+describe('extractTasksFromImage — hierarchy detection (real Gemini API)', () => {
+  beforeAll(() => {
+    if (!process.env.GOOGLE_API_KEY) {
+      throw new Error('GOOGLE_API_KEY is required. Set it in .env.local or CI secrets.');
+    }
+  });
   it('extracts parent tasks with subtasks from a hierarchical list image', async () => {
     const base64 = await createHierarchicalTaskImage();
     const result = await extractTasksFromImage(base64, 'image/png');

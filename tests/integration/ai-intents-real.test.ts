@@ -6,13 +6,12 @@
  * - recurrence rules
  *
  * These tests call the REAL OpenAI API — no mocks.
- * Requires OPENAI_API_KEY in .env.local.
- * Skipped in CI when the key is not available.
+ * Requires OPENAI_API_KEY in .env.local and CI secrets.
+ * Tests FAIL if the key is missing — never skip.
  */
-import { describe, it, expect } from 'vitest';
-import { transcribeAndClassifyIntent } from '../../src/lib/ai';
-
-const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+import { describe, it, expect, beforeAll } from 'vitest';
+// Real API tests call OpenAI directly (not via transcribeAndClassifyIntent)
+// to control the transcription text input while testing classification for real.
 
 // We can't test transcription without audio, so we test the classification
 // by directly calling the function with a pre-set transcription.
@@ -116,7 +115,12 @@ const existingTasks = [
   'Client onboarding presentation',
 ];
 
-describe.skipIf(!hasOpenAIKey)('Real OpenAI intent classification — assignee', () => {
+describe('Real OpenAI intent classification — assignee', () => {
+  beforeAll(() => {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is required. Set it in .env.local or CI secrets.');
+    }
+  });
   it('classifies "assign the budget review to Sarah" as update_task with assignee', async () => {
     const intent = await classifyText(
       'assign the budget review to Sarah',
@@ -142,7 +146,12 @@ describe.skipIf(!hasOpenAIKey)('Real OpenAI intent classification — assignee',
   }, 30_000);
 });
 
-describe.skipIf(!hasOpenAIKey)('Real OpenAI intent classification — priority override', () => {
+describe('Real OpenAI intent classification — priority override', () => {
+  beforeAll(() => {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is required. Set it in .env.local or CI secrets.');
+    }
+  });
   it('classifies "make the Nexus tutorial my top priority because the VP asked for it" correctly', async () => {
     const intent = await classifyText(
       'make the Nexus tutorial my top priority because the VP asked for it',
@@ -171,7 +180,12 @@ describe.skipIf(!hasOpenAIKey)('Real OpenAI intent classification — priority o
   }, 30_000);
 });
 
-describe.skipIf(!hasOpenAIKey)('Real OpenAI intent classification — recurrence', () => {
+describe('Real OpenAI intent classification — recurrence', () => {
+  beforeAll(() => {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is required. Set it in .env.local or CI secrets.');
+    }
+  });
   it('classifies "make the standup recurring every Monday" as update_task with recurrence', async () => {
     const intent = await classifyText(
       'make the standup recurring every Monday',
