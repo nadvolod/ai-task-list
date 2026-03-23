@@ -6,7 +6,7 @@ import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent } from '@/lib/ai';
 import { reprioritizeAllTasks } from '@/lib/priority';
-import { spawnNextRecurringInstance } from '@/app/api/tasks/[id]/route';
+import { spawnNextRecurringInstance } from '@/lib/task-operations';
 import { priorityOverrides } from '@/lib/db/schema';
 import { logger } from '@/lib/logger';
 
@@ -206,8 +206,9 @@ async function executeIntent(
         };
       }
 
-      // Fetch full task record for recurring spawn
-      const [fullTask] = await db.select().from(tasks).where(eq(tasks.id, match.id));
+      // Fetch full task record for recurring spawn, scoped to this user
+      const [fullTask] = await db.select().from(tasks)
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
       const [updated] = await db.update(tasks)
         .set({ status: 'done', updatedAt: new Date() })

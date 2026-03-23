@@ -6,12 +6,17 @@ import {
   type RecurrenceConfig,
 } from '../../src/lib/recurrence';
 
+/** Helper: extract YYYY-MM-DD from a Date in UTC */
+function toUTCDateString(d: Date): string {
+  return d.toISOString().split('T')[0];
+}
+
 describe('computeNextDueDate', () => {
   it('daily: returns next day', () => {
     const base = new Date('2026-03-23T10:00:00Z');
     const config: RecurrenceConfig = { rule: 'daily' };
     const next = computeNextDueDate(base, config);
-    expect(next.getDate()).toBe(24);
+    expect(next.getUTCDate()).toBe(24);
   });
 
   it('daily: skips forward if overdue', () => {
@@ -25,31 +30,31 @@ describe('computeNextDueDate', () => {
     const base = new Date('2026-03-23T10:00:00Z'); // Monday
     const config: RecurrenceConfig = { rule: 'weekly' };
     const next = computeNextDueDate(base, config);
-    expect(next.getDate()).toBe(30);
+    expect(next.getUTCDate()).toBe(30);
   });
 
   it('weekly: finds next matching weekday', () => {
-    const base = new Date('2026-03-23T10:00:00Z'); // Monday
+    const base = new Date('2026-03-23T10:00:00Z'); // Monday UTC
     const config: RecurrenceConfig = { rule: 'weekly', days: [3] }; // Wednesday
     const next = computeNextDueDate(base, config);
     // Next Wednesday after Monday March 23 = March 25
-    expect(next.getDate()).toBe(25);
-    expect(next.getDay()).toBe(3); // Wednesday
+    expect(next.getUTCDate()).toBe(25);
+    const dow = next.getUTCDay() === 0 ? 7 : next.getUTCDay(); // ISO day
+    expect(dow).toBe(3); // Wednesday
   });
 
   it('biweekly: adds 14 days when no specific days', () => {
     const base = new Date('2026-03-23T10:00:00Z');
     const config: RecurrenceConfig = { rule: 'biweekly' };
     const next = computeNextDueDate(base, config);
-    expect(next.getDate()).toBe(6); // April 6
+    expect(next.getUTCDate()).toBe(6); // April 6
   });
 
   it('monthly: same day next month', () => {
     const base = new Date('2026-03-15T10:00:00Z');
     const config: RecurrenceConfig = { rule: 'monthly' };
     const next = computeNextDueDate(base, config);
-    expect(next.getMonth()).toBe(3); // April (0-indexed)
-    expect(next.getDate()).toBe(15);
+    expect(toUTCDateString(next)).toMatch(/^2026-04-15/);
   });
 
   it('monthly: handles month with fewer days (Jan 31 → Feb 28)', () => {
@@ -57,8 +62,7 @@ describe('computeNextDueDate', () => {
     const base = new Date('2027-01-31T10:00:00Z');
     const config: RecurrenceConfig = { rule: 'monthly' };
     const next = computeNextDueDate(base, config);
-    expect(next.getMonth()).toBe(1); // February
-    expect(next.getDate()).toBe(28); // Feb 28 (non-leap year 2027)
+    expect(toUTCDateString(next)).toBe('2027-02-28');
   });
 
   it('uses today when currentDueDate is null', () => {
@@ -77,6 +81,21 @@ describe('shouldCreateNextInstance', () => {
   it('returns false when active is false', () => {
     const config: RecurrenceConfig = { rule: 'weekly', active: false };
     expect(shouldCreateNextInstance(config, new Date())).toBe(false);
+  });
+
+  it('returns false when active is string "false" (DB text column)', () => {
+    const config: RecurrenceConfig = { rule: 'weekly', active: 'false' };
+    expect(shouldCreateNextInstance(config, new Date())).toBe(false);
+  });
+
+  it('returns true when active is string "true"', () => {
+    const config: RecurrenceConfig = { rule: 'weekly', active: 'true' };
+    expect(shouldCreateNextInstance(config, new Date())).toBe(true);
+  });
+
+  it('returns true when active is null (default)', () => {
+    const config: RecurrenceConfig = { rule: 'weekly', active: null };
+    expect(shouldCreateNextInstance(config, new Date())).toBe(true);
   });
 
   it('returns false when end date is in the past', () => {

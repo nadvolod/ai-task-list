@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
       if (item.subtasks && item.subtasks.length > 0) {
         for (let i = 0; i < item.subtasks.length; i++) {
           const sub = item.subtasks[i];
+          if (!sub.title || !sub.title.trim()) continue; // skip empty subtask titles
           const [child] = await db.insert(tasks).values({
             userId,
             title: sub.title,

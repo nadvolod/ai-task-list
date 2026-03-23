@@ -134,8 +134,12 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
   }
 
   async function deleteSubtask(id: number) {
+    const subtaskToDelete = subtasks.find(s => s.id === id);
     setSubtasks(prev => prev.filter(s => s.id !== id));
-    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    if (!res.ok && subtaskToDelete) {
+      setSubtasks(prev => [...prev, subtaskToDelete]);
+    }
   }
 
   async function startRecording() {

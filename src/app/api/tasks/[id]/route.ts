@@ -5,51 +5,8 @@ import { db } from '@/lib/db';
 import { tasks, priorityOverrides } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
-import { computeNextDueDate, shouldCreateNextInstance, type RecurrenceConfig } from '@/lib/recurrence';
+import { spawnNextRecurringInstance } from '@/lib/task-operations';
 import { logger } from '@/lib/logger';
-
-/**
- * Shared logic: when a recurring task is completed, spawn the next instance.
- * Returns the new task or null.
- */
-export async function spawnNextRecurringInstance(
-  current: typeof tasks.$inferSelect
-): Promise<typeof tasks.$inferSelect | null> {
-  if (!current.recurrenceRule) return null;
-
-  const config: RecurrenceConfig = {
-    rule: current.recurrenceRule as RecurrenceConfig['rule'],
-    days: current.recurrenceDays ? current.recurrenceDays.split(',').map(Number) : undefined,
-    endDate: current.recurrenceEndDate ?? undefined,
-    active: current.recurrenceActive !== 'false',
-  };
-
-  if (!shouldCreateNextInstance(config, current.dueDate)) return null;
-
-  const nextDue = computeNextDueDate(current.dueDate, config);
-  const recurrenceParentId = current.recurrenceParentId ?? current.id;
-
-  const [newTask] = await db.insert(tasks).values({
-    userId: current.userId,
-    title: current.title,
-    description: current.description,
-    sourceType: current.sourceType,
-    monetaryValue: current.monetaryValue,
-    revenuePotential: current.revenuePotential,
-    urgency: current.urgency,
-    strategicValue: current.strategicValue,
-    assignee: current.assignee,
-    parentId: current.parentId,
-    recurrenceRule: current.recurrenceRule,
-    recurrenceDays: current.recurrenceDays,
-    recurrenceEndDate: current.recurrenceEndDate,
-    recurrenceParentId,
-    recurrenceActive: current.recurrenceActive,
-    dueDate: nextDue,
-  }).returning();
-
-  return newTask;
-}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -117,19 +74,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const newRecurrenceActive = body.recurrenceActive !== undefined ? body.recurrenceActive : current.recurrenceActive;
 
     // Handle manual priority override (Issue #11)
+    // Handle manual priority override with validation
     let newManualPriorityScore = current.manualPriorityScore;
     let newManualPriorityReason = current.manualPriorityReason;
     if (body.manualPriorityScore !== undefined) {
-      newManualPriorityScore = body.manualPriorityScore;
+      if (body.manualPriorityScore === null) {
+        newManualPriorityScore = null;
+      } else {
+        const parsed = Number(body.manualPriorityScore);
+        newManualPriorityScore = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
+      }
       newManualPriorityReason = body.manualPriorityReason ?? null;
 
-      // Record the override in history
-      if (body.manualPriorityScore !== null) {
+      // Record the override in history (only for valid non-null scores)
+      if (newManualPriorityScore !== null) {
         await db.insert(priorityOverrides).values({
           taskId,
           userId,
           previousScore: current.priorityScore,
-          newScore: body.manualPriorityScore,
+          newScore: newManualPriorityScore,
           reason: body.manualPriorityReason ?? 'Manual override',
           source: body.overrideSource ?? 'manual',
         });

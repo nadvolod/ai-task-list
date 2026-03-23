@@ -44,16 +44,18 @@ Return ONLY a JSON array: [{ "id": number, "score": number, "reason": "one sente
  * Only scores top-level tasks (not subtasks). Subtasks inherit parent's score.
  */
 export async function reprioritizeAllTasks(userId: number): Promise<void> {
-  const allTasks = await db
+  // Fetch ALL tasks (including done) for subtask progress, then filter for todo
+  const allTasksIncludingDone = await db
     .select()
     .from(tasks)
-    .where(and(eq(tasks.userId, userId), eq(tasks.status, 'todo')));
+    .where(eq(tasks.userId, userId));
 
-  if (allTasks.length === 0) return;
+  const allTodoTasks = allTasksIncludingDone.filter(t => t.status === 'todo');
+  if (allTodoTasks.length === 0) return;
 
-  // Separate top-level tasks from subtasks
-  const topLevel = allTasks.filter(t => t.parentId === null);
-  const subtasks = allTasks.filter(t => t.parentId !== null);
+  // Separate top-level tasks from subtasks (only todo for scoring)
+  const topLevel = allTodoTasks.filter(t => t.parentId === null);
+  const subtasks = allTodoTasks.filter(t => t.parentId !== null);
 
   if (topLevel.length === 0) return;
 
@@ -62,7 +64,6 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     await db.update(tasks)
       .set({ priorityScore: score, priorityReason: topLevel[0].manualPriorityReason ?? 'Only active task.', updatedAt: new Date() })
       .where(eq(tasks.id, topLevel[0].id));
-    // Inherit to subtasks
     for (const sub of subtasks.filter(s => s.parentId === topLevel[0].id)) {
       await db.update(tasks)
         .set({ priorityScore: score, priorityReason: 'Inherited from parent task.', updatedAt: new Date() })
@@ -71,10 +72,10 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     return;
   }
 
-  // Count subtask progress for context
+  // Count subtask progress for context (using ALL tasks including done)
   const subtaskProgress: Record<number, string> = {};
   for (const parent of topLevel) {
-    const children = allTasks.filter(t => t.parentId === parent.id);
+    const children = allTasksIncludingDone.filter(t => t.parentId === parent.id);
     if (children.length > 0) {
       const done = children.filter(c => c.status === 'done').length;
       subtaskProgress[parent.id] = `${done}/${children.length} subtasks done`;

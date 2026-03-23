@@ -4,7 +4,7 @@ export interface RecurrenceConfig {
   rule: RecurrenceRule;
   days?: number[];       // ISO weekdays 1-7 (Mon-Sun), for weekly/biweekly
   endDate?: Date | null;
-  active?: boolean;
+  active?: boolean | string | null; // DB stores as text 'true'/'false'
 }
 
 /**
@@ -120,7 +120,9 @@ export function shouldCreateNextInstance(
   config: RecurrenceConfig,
   currentDueDate: Date | null
 ): boolean {
-  if (config.active === false) return false;
+  // Normalize: treat null/undefined/true/'true' as active; false/'false' as inactive
+  const isActive = config.active == null || config.active === true || config.active === 'true';
+  if (!isActive) return false;
 
   if (config.endDate) {
     const nextDue = computeNextDueDate(currentDueDate, config);

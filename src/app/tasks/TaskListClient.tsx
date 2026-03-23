@@ -278,20 +278,23 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
       <div key={task.id} className={`bg-white rounded-xl border border-gray-100 shadow-sm ${task.status === 'done' ? 'opacity-60' : ''}`}>
         <div className="p-4 space-y-2">
           <div className="flex items-start gap-3">
-            {/* Expand/collapse for parents with children */}
-            {hasChildren ? (
+            {/* Chevron (if has children) + Checkbox (always) */}
+            <div className="flex items-start gap-1">
+              {task.parentId === null && (
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(task.id)}
+                  aria-expanded={isExpanded}
+                  aria-label={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
+                  className="mt-0.5 w-5 h-5 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              )}
               <button
-                onClick={() => toggleExpand(task.id)}
-                className="mt-0.5 w-5 h-5 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
-                aria-label={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
-              >
-                <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            ) : (
-              /* Checkbox for tasks without children */
-              <button
+                type="button"
                 onClick={() => toggleDone(task)}
                 aria-label={`Mark "${task.title}" as ${task.status === 'done' ? 'not done' : 'done'}`}
                 className={`mt-0.5 w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
@@ -304,7 +307,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                   </svg>
                 )}
               </button>
-            )}
+            </div>
 
             {/* Task content */}
             <div className="flex-1 min-w-0">
@@ -401,8 +404,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
           </div>
         </div>
 
-        {/* Subtasks (expanded) */}
-        {hasChildren && isExpanded && (
+        {/* Subtasks (expanded) — also show for leaf tasks so they can add first subtask */}
+        {isExpanded && (
           <div className="border-t border-gray-50 ml-6 mr-2 pb-2">
             {children.map(renderSubtask)}
             {/* Inline add subtask */}

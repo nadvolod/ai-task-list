@@ -77,10 +77,27 @@ export async function POST(req: NextRequest) {
       if (parent.parentId != null) {
         return NextResponse.json({ error: 'Cannot nest subtasks more than one level deep' }, { status: 400 });
       }
-      // Auto-set subtaskOrder to append at end
-      const [countResult] = await db.select({ count: sql<number>`count(*)` }).from(tasks)
-        .where(eq(tasks.parentId, parentId));
-      subtaskOrder = Number(countResult.count);
+      // Auto-set subtaskOrder to max+1 (handles gaps from deletions)
+      const [orderResult] = await db.select({
+        nextOrder: sql<number>`coalesce(max(${tasks.subtaskOrder}), -1) + 1`,
+      }).from(tasks)
+        .where(and(eq(tasks.parentId, parentId), eq(tasks.userId, userId)));
+      subtaskOrder = Number(orderResult.nextOrder);
+    }
+
+    // Validate recurrenceEndDate
+    let recurrenceEndDate: Date | null = null;
+    if (body.recurrenceEndDate) {
+      recurrenceEndDate = new Date(body.recurrenceEndDate);
+      if (isNaN(recurrenceEndDate.getTime())) {
+        return NextResponse.json({ error: 'recurrenceEndDate must be a valid date' }, { status: 400 });
+      }
+    }
+
+    // Validate recurrenceRule
+    const validRules = ['daily', 'weekly', 'biweekly', 'monthly'];
+    if (body.recurrenceRule && !validRules.includes(body.recurrenceRule)) {
+      return NextResponse.json({ error: 'recurrenceRule must be daily, weekly, biweekly, or monthly' }, { status: 400 });
     }
 
     logger.info('POST /api/tasks', { userId, title: body.title, parentId });
@@ -100,11 +117,9 @@ export async function POST(req: NextRequest) {
         dueDate,
         parentId,
         subtaskOrder,
-        // Recurrence fields (Issue #9)
         recurrenceRule: body.recurrenceRule ?? null,
         recurrenceDays: body.recurrenceDays ?? null,
-        recurrenceEndDate: body.recurrenceEndDate ? new Date(body.recurrenceEndDate) : null,
-        // Assignee (Issue #11)
+        recurrenceEndDate,
         assignee: body.assignee ?? null,
       })
       .returning();
