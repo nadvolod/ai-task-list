@@ -113,7 +113,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         strategicValue: newStrategic,
         manualOrder: body.manualOrder !== undefined ? body.manualOrder : current.manualOrder,
         dueDate: newDueDate,
-        category: body.category !== undefined ? body.category : current.category,
+        category: body.category !== undefined
+          ? (typeof body.category === 'string' && body.category.trim() ? body.category.trim() : null)
+          : current.category,
         assignee: newAssignee,
         recurrenceRule: newRecurrenceRule,
         recurrenceDays: newRecurrenceDays,

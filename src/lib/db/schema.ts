@@ -52,7 +52,7 @@ export const tasks = pgTable('tasks', {
 
 export const categoryBoosts = pgTable('category_boosts', {
   id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   category: text('category').notNull(),
   boost: integer('boost').notNull().default(0), // priority points added (e.g. +15)
   createdAt: timestamp('created_at').defaultNow().notNull(),

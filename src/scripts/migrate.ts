@@ -113,7 +113,7 @@ async function migrate() {
   await sql`
     CREATE TABLE IF NOT EXISTS category_boosts (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id),
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       category TEXT NOT NULL,
       boost INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW() NOT NULL

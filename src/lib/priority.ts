@@ -27,7 +27,7 @@ RANKING PRINCIPLES:
 3. EFFORT is the final tiebreaker. Among tasks with similar value and urgency, quicker/easier tasks rank slightly higher (faster ROI).
 4. MANUAL OVERRIDES must be respected. If a task has a "manual_priority" field, use that exact score — do NOT change it. The user explicitly set it.
 5. Recurring tasks should not be penalized for being recurring. Treat each instance on its own merits.
-6. CATEGORY BOOSTS: If a task has a "category_boost" field, add that many points to its score AFTER computing the base score. This is the user's preference for prioritizing certain categories of work.
+6. CATEGORY CONTEXT: Tasks may have a "category" field (e.g. "Temporal", "Personal"). Use this as context for understanding the task. Do NOT adjust scores based on category — category boosts are applied separately by the system.
 
 SCORING RULES:
 - Scores must be RELATIVE — spread them across the 0-100 range based on the current list
@@ -150,9 +150,11 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     for (const item of parsed) {
       const task = topLevel.find(t => t.id === item.id);
       // If task has manual override, use that instead
-      let baseScore = task?.manualPriorityScore ?? Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
-      // Apply category boost server-side as safety net
-      if (task?.category && boostMap[task.category] && !task.manualPriorityScore) {
+      let baseScore = task?.manualPriorityScore != null
+        ? task.manualPriorityScore
+        : Math.min(Math.max(Math.round(item.score ?? 0), 0), 100);
+      // Apply category boost server-side (only when no manual override)
+      if (task?.category && task.manualPriorityScore == null && boostMap[task.category] != null) {
         baseScore = Math.min(100, Math.max(0, baseScore + boostMap[task.category]));
       }
       const score = baseScore;
