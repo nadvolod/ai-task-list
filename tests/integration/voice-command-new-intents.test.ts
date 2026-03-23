@@ -181,6 +181,84 @@ describe('Voice command: manual priority override', () => {
   });
 });
 
+describe('Voice command: start_task (set status to doing)', () => {
+  beforeAll(async () => {
+    mockSession(testUserId);
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Flagler sale preparation' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await CreateTask(req);
+  });
+
+  beforeEach(() => mockSession(testUserId));
+
+  it('sets task status to doing via start_task intent', async () => {
+    nextIntentResponse = JSON.stringify({
+      intent: 'start_task',
+      task_query: 'flagler sale',
+    });
+
+    const req = createAudioRequest();
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    expect(data.intent).toBe('start_task');
+    expect(data.action).toBe('started');
+    expect(data.spokenResponse).toContain('in progress');
+    expect(data.taskUpdated).toBeDefined();
+    expect(data.taskUpdated.status).toBe('doing');
+  });
+
+  it('returns not_found when no matching task', async () => {
+    nextIntentResponse = JSON.stringify({
+      intent: 'start_task',
+      task_query: 'nonexistent xyz task',
+    });
+
+    const req = createAudioRequest();
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    expect(data.action).toBe('not_found');
+  });
+});
+
+describe('Voice command: update_task with status field', () => {
+  beforeAll(async () => {
+    mockSession(testUserId);
+    const req = new NextRequest('http://localhost/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Weekly report' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await CreateTask(req);
+  });
+
+  beforeEach(() => mockSession(testUserId));
+
+  it('updates task status via update_task intent', async () => {
+    nextIntentResponse = JSON.stringify({
+      intent: 'update_task',
+      task_query: 'weekly report',
+      updates: { status: 'doing' },
+    });
+
+    const req = createAudioRequest();
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    expect(data.intent).toBe('update_task');
+    expect(data.action).toBe('updated');
+    expect(data.spokenResponse).toContain('status');
+    expect(data.taskUpdated.status).toBe('doing');
+  });
+});
+
 describe('Voice command: set recurrence rule', () => {
   beforeAll(async () => {
     mockSession(testUserId);

@@ -154,7 +154,8 @@ Interpret context clues:
 - "worth X dollars" → monetary_value = X
 - "no monetary value" → monetary_value = 0, revenue_potential = 0
 - "strategic" or "long-term" → strategic_value 7-8
-- "by Friday", "next week", "end of month", "tomorrow" → due_date as ISO date string`,
+- "by Friday", "next week", "end of month", "tomorrow" → due_date as ISO date string
+- ONLY set due_date when the user explicitly mentions a deadline. Do NOT infer today's date just because the user says "I need to" or "I should".`,
       },
       {
         role: 'user',
@@ -183,7 +184,8 @@ Interpret context clues:
 export type VoiceIntent =
   | { intent: 'create_tasks'; tasks: VoiceCapturedTask[] }
   | { intent: 'complete_task'; task_query: string }
-  | { intent: 'update_task'; task_query: string; updates: { title?: string; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string; category?: string } }
+  | { intent: 'start_task'; task_query: string }
+  | { intent: 'update_task'; task_query: string; updates: { title?: string; status?: 'todo' | 'doing' | 'done'; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string; category?: string } }
   | { intent: 'delete_task'; task_query: string }
   | { intent: 'delete_all_tasks' }
   | { intent: 'query_briefing' }
@@ -256,7 +258,10 @@ INTENTS:
 9. undo_complete — User wants to reopen a completed task
    {"intent":"undo_complete","task_query":"search string"}
 
-10. unknown — Can't determine intent
+10. start_task — User is working on a task ("I'm working on X", "started X", "X is in progress")
+   {"intent":"start_task","task_query":"search string"}
+
+11. unknown — Can't determine intent
    {"intent":"unknown","raw_text":"original text"}
 
 MATCHING RULES:
@@ -271,7 +276,11 @@ MATCHING RULES:
 - "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"
 - "this should be higher priority because..." → update_task with priority_override and priority_reason
 - "categorize X as Temporal" or "this is a Temporal task" → update_task with category
-- Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low`,
+- "I'm working on X" or "I started X" or "X is in progress" → start_task
+- "pause X" or "stop working on X" → update_task with updates.status: "todo"
+- Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
+- ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`,
       },
       {
         role: 'user',
@@ -378,6 +387,8 @@ Rules:
 - Detect project/category context: "for Temporal", "this is a marketing task", "personal errand" → set category
 - Interpret "urgent"/"ASAP" as urgency 8-9
 - Interpret relative dates: "tomorrow", "Friday", "next week", "end of month"
+- ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)
 - Keep titles concise and actionable
 - Return valid JSON array only, no markdown`,
       },

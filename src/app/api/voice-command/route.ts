@@ -98,7 +98,8 @@ export async function POST(req: NextRequest) {
     logger.info('Voice command classified', { userId, intent: intent.intent, transcription: transcription.substring(0, 100) });
 
     // Execute the intent
-    const result = await executeIntent(intent, userId, userTasks);
+    const defaultAssignee = defaultAssigneeFromEmail(session.user.email);
+    const result = await executeIntent(intent, userId, userTasks, defaultAssignee);
 
     // Generate TTS if requested
     let speechUrl: string | null = null;
@@ -124,6 +125,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
+import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
+
 interface CommandResult {
   action: string;
   spokenResponse: string;
@@ -139,9 +142,10 @@ interface CommandResult {
 async function executeIntent(
   intent: VoiceIntent,
   userId: number,
-  userTasks: TaskRow[]
+  userTasks: TaskRow[],
+  defaultAssignee: string | null
 ): Promise<CommandResult> {
-  const pendingTasks = userTasks.filter(t => t.status === 'todo');
+  const pendingTasks = userTasks.filter(t => t.status !== 'done');
   const doneTasks = userTasks.filter(t => t.status === 'done');
 
   switch (intent.intent) {
@@ -165,6 +169,8 @@ async function executeIntent(
           userId, title: parsed.title.trim(), description: parsed.description || null,
           sourceType: 'voice_context', monetaryValue, revenuePotential, urgency, strategicValue,
           dueDate,
+          assignee: normalizeAssignee(parsed.assignee) ?? defaultAssignee,
+          category: parsed.category ?? null,
         }).returning();
 
         await db.insert(taskEvents).values({
@@ -262,6 +268,35 @@ async function executeIntent(
       };
     }
 
+    case 'start_task': {
+      if (!intent.task_query?.trim()) {
+        return {
+          action: 'not_found',
+          spokenResponse: 'Which task are you working on? Please specify.',
+        };
+      }
+      const match = fuzzyMatch(intent.task_query, pendingTasks);
+      if (!match) {
+        return {
+          action: 'not_found',
+          spokenResponse: `I couldn't find a pending task matching "${intent.task_query}". You have ${pendingTasks.length} pending tasks.`,
+        };
+      }
+
+      const [updated] = await db.update(tasks)
+        .set({ status: 'doing', updatedAt: new Date() })
+        .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
+        .returning();
+
+      logger.info('Voice start_task', { taskId: match.id, title: match.title });
+
+      return {
+        action: 'started',
+        spokenResponse: `Alright, "${match.title}" is now in progress.`,
+        taskUpdated: updated,
+      };
+    }
+
     case 'update_task': {
       const match = fuzzyMatch(intent.task_query, userTasks);
       if (!match) {
@@ -274,6 +309,10 @@ async function executeIntent(
       const updates: Record<string, unknown> = { updatedAt: new Date() };
       const changes: string[] = [];
 
+      if (intent.updates.status && ['todo', 'doing', 'done'].includes(intent.updates.status)) {
+        updates.status = intent.updates.status;
+        changes.push(`status to ${intent.updates.status}`);
+      }
       if (intent.updates.due_date) {
         const d = new Date(intent.updates.due_date);
         if (!isNaN(d.getTime())) {

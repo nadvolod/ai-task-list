@@ -55,8 +55,20 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     });
   }
 
-  async function toggleDone(task: Task) {
-    const newStatus = task.status === 'done' ? 'todo' : 'done';
+  function nextStatus(current: Task['status']): Task['status'] {
+    if (current === 'todo') return 'doing';
+    if (current === 'doing') return 'done';
+    return 'todo';
+  }
+
+  function statusLabel(status: Task['status']): string {
+    if (status === 'doing') return 'in progress';
+    if (status === 'done') return 'done';
+    return 'to do';
+  }
+
+  async function cycleStatus(task: Task) {
+    const newStatus = nextStatus(task.status);
     const prevTasks = tasks;
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
     const res = await fetch(`/api/tasks/${task.id}`, {
@@ -87,7 +99,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
   function handleToggleDoneById(taskId: number) {
     const task = tasks.find(t => t.id === taskId);
-    if (task) toggleDone(task);
+    if (task) cycleStatus(task);
   }
 
   async function deleteTask(id: number) {
@@ -184,18 +196,20 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
   }
 
   // Counts based on top-level tasks only
-  const todayCount = topLevelTasks.filter(t => t.status === 'todo' && isDueToday(t.dueDate)).length;
-  const overdueCount = topLevelTasks.filter(t => t.status === 'todo' && isOverdue(t.dueDate)).length;
-  const highCount = topLevelTasks.filter(t => t.status === 'todo' && t.priorityScore >= 60).length;
-  const recurringCount = topLevelTasks.filter(t => t.status === 'todo' && t.recurrenceRule != null).length;
+  const todayCount = topLevelTasks.filter(t => t.status !== 'done' && isDueToday(t.dueDate)).length;
+  const overdueCount = topLevelTasks.filter(t => t.status !== 'done' && isOverdue(t.dueDate)).length;
+  const highCount = topLevelTasks.filter(t => t.status !== 'done' && t.priorityScore >= 60).length;
+  const recurringCount = topLevelTasks.filter(t => t.status !== 'done' && t.recurrenceRule != null).length;
+  const doingCount = topLevelTasks.filter(t => t.status === 'doing').length;
 
   let filtered = topLevelTasks;
 
   // Apply filter
-  if (activeFilter === 'today') filtered = filtered.filter(t => t.status === 'todo' && isDueToday(t.dueDate));
-  else if (activeFilter === 'overdue') filtered = filtered.filter(t => t.status === 'todo' && isOverdue(t.dueDate));
-  else if (activeFilter === 'high') filtered = filtered.filter(t => t.status === 'todo' && t.priorityScore >= 60);
-  else if (activeFilter === 'recurring') filtered = filtered.filter(t => t.status === 'todo' && t.recurrenceRule != null);
+  if (activeFilter === 'today') filtered = filtered.filter(t => t.status !== 'done' && isDueToday(t.dueDate));
+  else if (activeFilter === 'overdue') filtered = filtered.filter(t => t.status !== 'done' && isOverdue(t.dueDate));
+  else if (activeFilter === 'high') filtered = filtered.filter(t => t.status !== 'done' && t.priorityScore >= 60);
+  else if (activeFilter === 'recurring') filtered = filtered.filter(t => t.status !== 'done' && t.recurrenceRule != null);
+  else if (activeFilter === 'doing') filtered = filtered.filter(t => t.status === 'doing');
   else if (activeFilter === 'done') filtered = filtered.filter(t => t.status === 'done');
 
   // Apply search — also include parents whose subtasks match
@@ -210,6 +224,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     });
   }
 
+  const inProgress = activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'doing');
   const pending = activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'todo');
   const done = activeFilter === 'done' ? filtered : (activeFilter === 'all' ? filtered.filter(t => t.status === 'done') : []);
 
@@ -233,6 +248,32 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     return <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>;
   }
 
+  function statusIcon(status: Task['status'], size: 'sm' | 'md' = 'md') {
+    const w = size === 'sm' ? 'w-4 h-4' : 'w-5 h-5';
+    const iconW = size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3';
+    if (status === 'done') {
+      return (
+        <div className={`${w} rounded-full bg-green-500 border-2 border-green-500 flex items-center justify-center`}>
+          <svg className={`${iconW} text-white`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+      );
+    }
+    if (status === 'doing') {
+      return (
+        <div className={`${w} rounded-full bg-amber-500 border-2 border-amber-500 flex items-center justify-center`}>
+          <svg className={`${iconW} text-white`} fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        </div>
+      );
+    }
+    return (
+      <div className={`${w} rounded-full border-2 border-gray-300`} />
+    );
+  }
+
   function renderSubtask(task: Task) {
     return (
       <div
@@ -240,17 +281,11 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
         className={`flex items-start gap-3 py-2 px-3 ${task.status === 'done' ? 'opacity-50' : ''}`}
       >
         <button
-          onClick={() => toggleDone(task)}
-          aria-label={`Mark "${task.title}" as ${task.status === 'done' ? 'not done' : 'done'}`}
-          className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-            task.status === 'done' ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-blue-400'
-          }`}
+          onClick={() => cycleStatus(task)}
+          aria-label={`Mark "${task.title}" as ${statusLabel(nextStatus(task.status))}`}
+          className="mt-0.5 flex-shrink-0 transition-colors hover:opacity-80"
         >
-          {task.status === 'done' && (
-            <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          )}
+          {statusIcon(task.status, 'sm')}
         </button>
         <p className={`flex-1 text-xs leading-snug ${task.status === 'done' ? 'line-through text-gray-400' : 'text-gray-700'}`}>
           {task.title}
@@ -295,17 +330,11 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
               )}
               <button
                 type="button"
-                onClick={() => toggleDone(task)}
-                aria-label={`Mark "${task.title}" as ${task.status === 'done' ? 'not done' : 'done'}`}
-                className={`mt-0.5 w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                  task.status === 'done' ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-blue-400'
-                }`}
+                onClick={() => cycleStatus(task)}
+                aria-label={`Mark "${task.title}" as ${statusLabel(nextStatus(task.status))}`}
+                className="mt-0.5 flex-shrink-0 transition-colors hover:opacity-80"
               >
-                {task.status === 'done' && (
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
+                {statusIcon(task.status)}
               </button>
             </div>
 
@@ -320,6 +349,13 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${priorityColor(task.priorityScore)}`}>
                   Score: {Math.round(task.priorityScore)}
                 </span>
+
+                {/* In Progress badge */}
+                {task.status === 'doing' && (
+                  <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full font-medium">
+                    In Progress
+                  </span>
+                )}
 
                 {/* Subtask progress badge */}
                 {hasChildren && (
@@ -532,11 +568,11 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
           onSearchChange={setSearchQuery}
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
-          counts={{ today: todayCount, overdue: overdueCount, high: highCount, recurring: recurringCount }}
+          counts={{ today: todayCount, overdue: overdueCount, high: highCount, recurring: recurringCount, doing: doingCount }}
         />
 
         {/* Task list */}
-        {pending.length === 0 && done.length === 0 && (
+        {inProgress.length === 0 && pending.length === 0 && done.length === 0 && (
           <div className="text-center py-16 text-gray-400">
             <p className="text-4xl mb-3">📋</p>
             <p className="text-sm">
@@ -545,6 +581,15 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
             <p className="text-xs mt-1">
               {searchQuery || activeFilter !== 'all' ? 'Try a different search or filter.' : 'Add a task or tap the mic to speak.'}
             </p>
+          </div>
+        )}
+
+        {inProgress.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-2">In Progress</p>
+            <div className="space-y-2">
+              {inProgress.map(renderTask)}
+            </div>
           </div>
         )}
 

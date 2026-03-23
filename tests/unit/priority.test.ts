@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculatePriorityFallback } from '../../src/lib/priority';
+import { calculatePriorityFallback, enforceMonetaryOrdering } from '../../src/lib/priority';
 
 describe('calculatePriorityFallback', () => {
   it('returns score 0 for empty input', () => {
@@ -144,5 +144,143 @@ describe('calculatePriorityFallback', () => {
     const result = calculatePriorityFallback({ urgency: 5, dueDate: null });
     const resultNoDue = calculatePriorityFallback({ urgency: 5 });
     expect(result.score).toBe(resultNoDue.score);
+  });
+
+  it('$1M task scores higher than $78K task (fallback)', () => {
+    const million = calculatePriorityFallback({ monetaryValue: 1000000 });
+    const seventy8k = calculatePriorityFallback({ monetaryValue: 78000 });
+    expect(million.score).toBeGreaterThan(seventy8k.score);
+  });
+
+  it('$1M > $78K > $12K ordering in fallback', () => {
+    const million = calculatePriorityFallback({ monetaryValue: 1000000 });
+    const seventy8k = calculatePriorityFallback({ monetaryValue: 78000 });
+    const twelve = calculatePriorityFallback({ monetaryValue: 12000 });
+    expect(million.score).toBeGreaterThan(seventy8k.score);
+    expect(seventy8k.score).toBeGreaterThan(twelve.score);
+  });
+
+  it('monetary value gets 60% weight (up from 50%)', () => {
+    // log10(1000000) = 6, * 12 = 72, capped at 60
+    const million = calculatePriorityFallback({ monetaryValue: 1000000 });
+    expect(million.score).toBe(60);
+  });
+});
+
+describe('enforceMonetaryOrdering', () => {
+  it('$1M task scores strictly higher than $78K task after correction', () => {
+    const scored = [
+      { id: 1, score: 60, reason: 'low' },
+      { id: 2, score: 100, reason: 'high' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: 1000000, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: 78000, revenuePotential: null, manualPriorityScore: null },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    const task1 = result.find(r => r.id === 1)!;
+    const task2 = result.find(r => r.id === 2)!;
+    expect(task1.score).toBeGreaterThan(task2.score);
+  });
+
+  it('$78K task scores strictly higher than $12K task after correction', () => {
+    const scored = [
+      { id: 1, score: 50, reason: 'a' },
+      { id: 2, score: 90, reason: 'b' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: 78000, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: 12000, revenuePotential: null, manualPriorityScore: null },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    const task1 = result.find(r => r.id === 1)!;
+    const task2 = result.find(r => r.id === 2)!;
+    expect(task1.score).toBeGreaterThan(task2.score);
+  });
+
+  it('preserves manual overrides (does not change them)', () => {
+    const scored = [
+      { id: 1, score: 30, reason: 'low' },
+      { id: 2, score: 80, reason: 'manual' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: 1000000, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: 100, revenuePotential: null, manualPriorityScore: 80 },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    // Task 2 has manual override, should not be in monetary ordering
+    // Task 1 has $1M with no one to compare against (task 2 is excluded)
+    const task2 = result.find(r => r.id === 2)!;
+    expect(task2.score).toBe(80); // unchanged
+  });
+
+  it('no-op when no monetary values present', () => {
+    const scored = [
+      { id: 1, score: 50, reason: 'a' },
+      { id: 2, score: 80, reason: 'b' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: null, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: null, revenuePotential: null, manualPriorityScore: null },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    expect(result).toEqual(scored);
+  });
+
+  it('handles empty task list gracefully', () => {
+    const result = enforceMonetaryOrdering([], []);
+    expect(result).toEqual([]);
+  });
+
+  it('tasks with equal monetary values keep AI ordering', () => {
+    const scored = [
+      { id: 1, score: 70, reason: 'a' },
+      { id: 2, score: 80, reason: 'b' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: 50000, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: 50000, revenuePotential: null, manualPriorityScore: null },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    // Same monetary value, AI ordering preserved
+    const task1 = result.find(r => r.id === 1)!;
+    const task2 = result.find(r => r.id === 2)!;
+    expect(task1.score).toBe(70);
+    expect(task2.score).toBe(80);
+  });
+
+  it('transitively corrects 3-task chain ($1M=10, $500K=20, $78K=90)', () => {
+    const scored = [
+      { id: 1, score: 10, reason: 'a' },
+      { id: 2, score: 20, reason: 'b' },
+      { id: 3, score: 90, reason: 'c' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: 1000000, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: 500000, revenuePotential: null, manualPriorityScore: null },
+      { id: 3, monetaryValue: 78000, revenuePotential: null, manualPriorityScore: null },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    const task1 = result.find(r => r.id === 1)!;
+    const task2 = result.find(r => r.id === 2)!;
+    const task3 = result.find(r => r.id === 3)!;
+    // Must preserve: $1M > $500K > $78K
+    expect(task1.score).toBeGreaterThan(task2.score);
+    expect(task2.score).toBeGreaterThan(task3.score);
+  });
+
+  it('enforces minimum 5-point gap for >5x value ratio', () => {
+    const scored = [
+      { id: 1, score: 82, reason: 'a' },
+      { id: 2, score: 80, reason: 'b' },
+    ];
+    const details = [
+      { id: 1, monetaryValue: 1000000, revenuePotential: null, manualPriorityScore: null },
+      { id: 2, monetaryValue: 10000, revenuePotential: null, manualPriorityScore: null },
+    ];
+    const result = enforceMonetaryOrdering(scored, details);
+    const task1 = result.find(r => r.id === 1)!;
+    const task2 = result.find(r => r.id === 2)!;
+    expect(task1.score - task2.score).toBeGreaterThanOrEqual(5);
   });
 });

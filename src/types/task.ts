@@ -2,7 +2,7 @@ export interface Task {
   id: number;
   title: string;
   description: string | null;
-  status: string;
+  status: 'todo' | 'doing' | 'done';
   priorityScore: number;
   priorityReason: string | null;
   monetaryValue: number | null;

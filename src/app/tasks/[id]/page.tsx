@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import TaskDetailClient from './TaskDetailClient';
+import type { Task } from '@/types/task';
 
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -25,6 +26,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   const serialized = {
     ...task,
+    status: task.status as Task['status'],
     dueDate: task.dueDate?.toISOString() ?? null,
     recurrenceEndDate: task.recurrenceEndDate?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),

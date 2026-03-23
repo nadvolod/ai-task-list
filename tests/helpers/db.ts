@@ -39,9 +39,9 @@ export async function cleanupTestUser(userId: number) {
 
 const mockedGetServerSession = vi.mocked(getServerSession);
 
-export function mockSession(userId: number) {
+export function mockSession(userId: number, email?: string) {
   mockedGetServerSession.mockResolvedValue({
-    user: { id: String(userId) },
+    user: { id: String(userId), email: email ?? `user-${userId}@test.com` },
     expires: new Date(Date.now() + 86400000).toISOString(),
   });
 }
