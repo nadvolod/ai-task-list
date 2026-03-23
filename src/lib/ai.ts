@@ -22,6 +22,7 @@ export interface ExtractedTask {
   recurrence_rule?: string;
   recurrence_days?: string;
   due_date?: string;
+  category?: string;
 }
 
 export async function extractTasksFromImage(
@@ -67,6 +68,7 @@ Rules:
 - For weekly tasks on specific days, set recurrence_days as comma-separated ISO weekday numbers (1=Mon through 7=Sun).
 - If a task is recurring and no explicit due date, set due_date to the next occurrence from today (${today}).
 - If a group of tasks share recurrence context (e.g., a list titled "Weekly Tasks"), apply that recurrence to all tasks.
+- Detect task categories/projects from context. If tasks are grouped under a heading like "Temporal", "Marketing", "Personal", set the "category" field. If the image has a title or header suggesting a project/company, apply that category to all tasks.
 - Preserve the user's wording as closely as possible.
 - Clean up obvious OCR noise (stray characters, garbled words).
 - Do not add tasks that are not in the image.
@@ -181,7 +183,7 @@ Interpret context clues:
 export type VoiceIntent =
   | { intent: 'create_tasks'; tasks: VoiceCapturedTask[] }
   | { intent: 'complete_task'; task_query: string }
-  | { intent: 'update_task'; task_query: string; updates: { title?: string; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string } }
+  | { intent: 'update_task'; task_query: string; updates: { title?: string; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string; category?: string } }
   | { intent: 'delete_task'; task_query: string }
   | { intent: 'delete_all_tasks' }
   | { intent: 'query_briefing' }
@@ -268,6 +270,7 @@ MATCHING RULES:
 - "make X my top priority" or "X is the most important" → update_task with priority_override: 95, priority_reason explaining why
 - "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"
 - "this should be higher priority because..." → update_task with priority_override and priority_reason
+- "categorize X as Temporal" or "this is a Temporal task" → update_task with category
 - Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low`,
       },
       {
@@ -321,6 +324,7 @@ export interface VoiceCapturedTask {
   recurrence_rule?: string;
   recurrence_days?: string;
   assignee?: string;
+  category?: string;
 }
 
 /**
@@ -371,6 +375,7 @@ Rules:
 - If user mentions sub-items ("which involves A, B, and C" or "I need to do X: first A, then B, then C"), structure as parent task with subtasks array
 - Detect recurring patterns: "every Monday", "weekly standup", "daily check-in" → set recurrence_rule and recurrence_days (1=Mon..7=Sun)
 - "assign this to Sarah" or "Sarah needs to handle this" → set assignee
+- Detect project/category context: "for Temporal", "this is a marketing task", "personal errand" → set category
 - Interpret "urgent"/"ASAP" as urgency 8-9
 - Interpret relative dates: "tomorrow", "Friday", "next week", "end of month"
 - Keep titles concise and actionable

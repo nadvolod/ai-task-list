@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
         dueDate: dueDate && !isNaN(dueDate.getTime()) ? dueDate : null,
         recurrenceRule: item.recurrence_rule ?? null,
         recurrenceDays: item.recurrence_days ?? null,
+        category: item.category ?? null,
       }).returning();
       allCreatedIds.push(parent.id);
 

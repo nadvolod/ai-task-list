@@ -23,6 +23,7 @@ interface TaskRow {
   dueDate: Date | null;
   description: string | null;
   parentId: number | null;
+  category: string | null;
   recurrenceRule: string | null;
   recurrenceDays: string | null;
   recurrenceEndDate: Date | null;
@@ -307,6 +308,10 @@ async function executeIntent(
       if (intent.updates.assignee) {
         updates.assignee = intent.updates.assignee;
         changes.push(`assigned to ${intent.updates.assignee}`);
+      }
+      if (intent.updates.category) {
+        updates.category = intent.updates.category;
+        changes.push(`category to "${intent.updates.category}"`);
       }
       if (intent.updates.recurrence_rule) {
         updates.recurrenceRule = intent.updates.recurrence_rule;

@@ -352,6 +352,13 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                   </span>
                 )}
 
+                {/* Category badge */}
+                {task.category && (
+                  <span className="text-xs text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-full font-medium">
+                    {task.category}
+                  </span>
+                )}
+
                 {/* Assignee badge */}
                 {task.assignee && (
                   <span className="text-xs text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full font-medium">
