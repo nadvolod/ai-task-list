@@ -13,9 +13,9 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'chromium-mobile',
       use: {
-        ...devices['iPhone 13'],
+        ...devices['Pixel 5'],
       },
     },
   ],
