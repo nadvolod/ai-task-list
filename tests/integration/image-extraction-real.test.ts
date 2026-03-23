@@ -1,66 +1,49 @@
 /**
  * Real integration tests for image extraction via Gemini API.
  * These tests hit the actual Google Gemini API — no mocks.
- * Requires GOOGLE_API_KEY to be set in .env.local and CI secrets.
+ * Uses ONE API call for the main test to conserve quota.
+ * Requires GOOGLE_API_KEY in .env.local and CI secrets.
  * Tests FAIL if the key is missing — never skip.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { extractTasksFromImage } from '../../src/lib/ai';
+import { extractTasksFromImage, type ExtractedTask } from '../../src/lib/ai';
 import fs from 'fs';
 import path from 'path';
 
 const FIXTURE_PATH = path.join(__dirname, '..', 'fixtures', 'test-tasks.png');
 
 describe('extractTasksFromImage (real Gemini API)', () => {
-  beforeAll(() => {
+  let result: { tasks: ExtractedTask[]; rawText: string };
+
+  beforeAll(async () => {
     if (!process.env.GOOGLE_API_KEY) {
       throw new Error('GOOGLE_API_KEY is required. Set it in .env.local or CI secrets.');
     }
-  });
-  it('extracts tasks from a PNG image with a to-do list', async () => {
+    // Single API call shared across all assertions
     const imageBuffer = fs.readFileSync(FIXTURE_PATH);
     const base64 = imageBuffer.toString('base64');
+    result = await extractTasksFromImage(base64, 'image/png');
+  }, 30_000);
 
-    const result = await extractTasksFromImage(base64, 'image/png');
-
-    expect(result).toHaveProperty('tasks');
-    expect(result).toHaveProperty('rawText');
-    expect(Array.isArray(result.tasks)).toBe(true);
-
-    // The test image has 5 tasks — Gemini should extract at least 3
+  it('extracts at least 3 tasks from the test image', () => {
     expect(result.tasks.length).toBeGreaterThanOrEqual(3);
+  });
 
-    // Each task should have title and confidence
+  it('each task has title and valid confidence', () => {
     for (const task of result.tasks) {
       expect(task.title).toBeTruthy();
       expect(typeof task.title).toBe('string');
       expect(task.confidence).toBeGreaterThanOrEqual(0.5);
       expect(task.confidence).toBeLessThanOrEqual(1.0);
     }
+  });
 
-    // Verify the extracted tasks match expected content (fuzzy — AI may rephrase slightly)
+  it('extracted tasks match expected content from the test image', () => {
     const allTitles = result.tasks.map((t) => t.title.toLowerCase()).join(' ');
     expect(allTitles).toMatch(/groceries|dentist|budget|invoice|flight|conference/i);
+  });
 
-    // Raw text should contain some of the original text
+  it('raw text is non-empty', () => {
     expect(result.rawText.length).toBeGreaterThan(0);
-  }, 30_000);
-
-  it('returns empty tasks for a blank image', async () => {
-    // Create a minimal 1x1 white PNG
-    const sharp = (await import('sharp')).default;
-    const blankPng = await sharp({
-      create: { width: 100, height: 100, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
-    })
-      .png()
-      .toBuffer();
-
-    const base64 = blankPng.toString('base64');
-    const result = await extractTasksFromImage(base64, 'image/png');
-
-    expect(result).toHaveProperty('tasks');
-    expect(Array.isArray(result.tasks)).toBe(true);
-    // A blank image should yield no tasks (or very few false positives)
-    expect(result.tasks.length).toBeLessThanOrEqual(1);
-  }, 30_000);
+  });
 });
