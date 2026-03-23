@@ -9,7 +9,7 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: 'http://localhost:3000',
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
   },
   projects: [
     {

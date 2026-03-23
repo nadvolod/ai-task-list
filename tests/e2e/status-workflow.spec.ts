@@ -6,47 +6,61 @@ test.describe('Status workflow: todo -> doing -> done', () => {
     await login(page);
   });
 
-  test('cycles status through todo -> doing -> done -> todo', async ({ page }) => {
+  test('cycles status through todo -> doing -> done -> todo with server round-trip', async ({ page }) => {
     const taskTitle = `Status test ${Date.now()}`;
     await quickAddTask(page, taskTitle);
 
-    // Find the task card
     const taskCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
-
-    // Initial state: todo (empty gray circle - no bg-amber, no bg-green)
     const statusBtn = taskCard.locator('button').first();
 
-    // Click 1: todo -> doing (amber circle should appear)
+    // Click 1: todo -> doing
     await statusBtn.click();
-    await expect(taskCard.locator('.bg-amber-500').first()).toBeVisible({ timeout: 5000 });
-    // "In Progress" badge should appear
-    await expect(taskCard.locator('text=In Progress')).toBeVisible();
+    // Wait for PATCH to complete, then reload to verify server state
+    await page.waitForTimeout(1000);
+    await page.reload();
+    await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
+    const cardAfterDoing = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await expect(cardAfterDoing.locator('.bg-amber-500').first()).toBeVisible({ timeout: 5000 });
+    await expect(cardAfterDoing.locator('text=In Progress')).toBeVisible();
 
-    // Click 2: doing -> done (green circle should appear)
-    await statusBtn.click();
-    await expect(taskCard.locator('.bg-green-500').first()).toBeVisible({ timeout: 5000 });
+    // Click 2: doing -> done
+    const statusBtn2 = cardAfterDoing.locator('button').first();
+    await statusBtn2.click();
+    await page.waitForTimeout(1000);
+    await page.reload();
+    await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
+    const cardAfterDone = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await expect(cardAfterDone.locator('.bg-green-500').first()).toBeVisible({ timeout: 5000 });
 
-    // Click 3: done -> todo (back to gray circle)
-    await statusBtn.click();
-    // The task should be back in pending state (no green, no amber fill)
-    await expect(taskCard.locator('.bg-green-500')).not.toBeVisible();
-    await expect(taskCard.locator('.bg-amber-500')).not.toBeVisible();
+    // Click 3: done -> todo
+    const statusBtn3 = cardAfterDone.locator('button').first();
+    await statusBtn3.click();
+    await page.waitForTimeout(1000);
+    await page.reload();
+    await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
+    const cardAfterTodo = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await expect(cardAfterTodo.locator('.bg-green-500')).not.toBeVisible();
+    await expect(cardAfterTodo.locator('.bg-amber-500')).not.toBeVisible();
   });
 
-  test('In Progress filter shows only doing tasks', async ({ page }) => {
-    const taskTitle = `Filter test ${Date.now()}`;
-    await quickAddTask(page, taskTitle);
+  test('In Progress filter shows doing tasks and hides todo tasks', async ({ page }) => {
+    // Create two tasks
+    const doingTask = `Doing task ${Date.now()}`;
+    const todoTask = `Todo task ${Date.now()}`;
+    await quickAddTask(page, doingTask);
+    await quickAddTask(page, todoTask);
 
-    // Set task to doing
-    const taskCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
-    const statusBtn = taskCard.locator('button').first();
-    await statusBtn.click();
-    await expect(taskCard.locator('.bg-amber-500').first()).toBeVisible({ timeout: 5000 });
+    // Set first task to doing
+    const doingCard = page.locator(`text=${doingTask}`).locator('..').locator('..');
+    await doingCard.locator('button').first().click();
+    await page.waitForTimeout(1000);
 
     // Click "In Progress" filter
     await page.click('button:has-text("In Progress")');
+    await page.waitForTimeout(500);
 
-    // Task should still be visible
-    await expect(page.locator(`text=${taskTitle}`)).toBeVisible();
+    // Doing task should be visible, todo task should not
+    await expect(page.locator(`text=${doingTask}`)).toBeVisible();
+    await expect(page.locator(`text=${todoTask}`)).not.toBeVisible();
   });
 });

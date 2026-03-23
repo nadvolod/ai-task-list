@@ -125,11 +125,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function defaultAssigneeFromEmail(email?: string | null): string | null {
-  if (!email) return null;
-  const prefix = email.split('@')[0];
-  return prefix.charAt(0).toUpperCase() + prefix.slice(1);
-}
+import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
 
 interface CommandResult {
   action: string;
@@ -173,7 +169,7 @@ async function executeIntent(
           userId, title: parsed.title.trim(), description: parsed.description || null,
           sourceType: 'voice_context', monetaryValue, revenuePotential, urgency, strategicValue,
           dueDate,
-          assignee: parsed.assignee ?? defaultAssignee,
+          assignee: normalizeAssignee(parsed.assignee) ?? defaultAssignee,
           category: parsed.category ?? null,
         }).returning();
 
@@ -273,6 +269,12 @@ async function executeIntent(
     }
 
     case 'start_task': {
+      if (!intent.task_query?.trim()) {
+        return {
+          action: 'not_found',
+          spokenResponse: 'Which task are you working on? Please specify.',
+        };
+      }
       const match = fuzzyMatch(intent.task_query, pendingTasks);
       if (!match) {
         return {

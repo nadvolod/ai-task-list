@@ -6,19 +6,21 @@ test.describe('Default assignee', () => {
     await login(page);
   });
 
-  test('quick-add task gets default assignee from email', async ({ page }) => {
+  test('quick-add task gets default assignee badge from email', async ({ page }) => {
     const taskTitle = `Assignee test ${Date.now()}`;
     await quickAddTask(page, taskTitle);
 
-    // The task card should show an assignee badge (derived from user's email prefix)
+    // The task card should show an assignee badge (teal-colored)
     const taskCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
-    // Look for a teal badge (assignee badge color)
     const assigneeBadge = taskCard.locator('.text-teal-700');
     await expect(assigneeBadge).toBeVisible({ timeout: 10_000 });
+    // The badge text should be non-empty (derived from email prefix)
+    const badgeText = await assigneeBadge.textContent();
+    expect(badgeText!.trim().length).toBeGreaterThan(0);
   });
 
-  test('explicit assignee overrides default', async ({ page }) => {
-    // Navigate to new task form
+  test('task created via detail form with explicit assignee shows that assignee', async ({ page }) => {
+    // Navigate to task detail form
     await page.click('a[title="Add with details"]');
     await page.waitForURL('**/tasks/new');
 
@@ -27,7 +29,10 @@ test.describe('Default assignee', () => {
     await page.click('button[type="submit"]');
     await page.waitForURL('**/tasks');
 
-    // Task should appear with the default assignee (from email prefix)
+    // Task should appear with the default assignee badge
     await expect(page.locator(`text=${taskTitle}`)).toBeVisible({ timeout: 10_000 });
+    const taskCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    const assigneeBadge = taskCard.locator('.text-teal-700');
+    await expect(assigneeBadge).toBeVisible({ timeout: 10_000 });
   });
 });

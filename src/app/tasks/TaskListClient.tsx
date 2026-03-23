@@ -61,6 +61,12 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     return 'todo';
   }
 
+  function statusLabel(status: Task['status']): string {
+    if (status === 'doing') return 'in progress';
+    if (status === 'done') return 'done';
+    return 'to do';
+  }
+
   async function cycleStatus(task: Task) {
     const newStatus = nextStatus(task.status);
     const prevTasks = tasks;
@@ -276,7 +282,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
       >
         <button
           onClick={() => cycleStatus(task)}
-          aria-label={`Mark "${task.title}" as ${nextStatus(task.status)}`}
+          aria-label={`Mark "${task.title}" as ${statusLabel(nextStatus(task.status))}`}
           className="mt-0.5 flex-shrink-0 transition-colors hover:opacity-80"
         >
           {statusIcon(task.status, 'sm')}
@@ -325,7 +331,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
               <button
                 type="button"
                 onClick={() => cycleStatus(task)}
-                aria-label={`Mark "${task.title}" as ${nextStatus(task.status)}`}
+                aria-label={`Mark "${task.title}" as ${statusLabel(nextStatus(task.status))}`}
                 className="mt-0.5 flex-shrink-0 transition-colors hover:opacity-80"
               >
                 {statusIcon(task.status)}

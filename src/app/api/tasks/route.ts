@@ -6,12 +6,7 @@ import { tasks } from '@/lib/db/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
-
-function defaultAssigneeFromEmail(email?: string | null): string | null {
-  if (!email) return null;
-  const prefix = email.split('@')[0];
-  return prefix.charAt(0).toUpperCase() + prefix.slice(1);
-}
+import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
 
 export async function GET(_req: NextRequest) {
   try {
@@ -127,7 +122,7 @@ export async function POST(req: NextRequest) {
         recurrenceDays: body.recurrenceDays ?? null,
         recurrenceEndDate,
         category: typeof body.category === 'string' && body.category.trim() ? body.category.trim() : null,
-        assignee: body.assignee ?? defaultAssigneeFromEmail(session.user.email),
+        assignee: normalizeAssignee(body.assignee) ?? defaultAssigneeFromEmail(session.user.email),
       })
       .returning();
 

@@ -1,59 +1,68 @@
 import { test, expect } from '@playwright/test';
 import { login, quickAddTask } from './helpers/auth';
 
+test.beforeAll(() => {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required for E2E scoring tests.');
+  }
+});
+
 test.describe('Priority scoring with monetary values', () => {
-  // These tests hit the real OpenAI API through the running app
   test.setTimeout(90_000);
 
   test.beforeEach(async ({ page }) => {
     await login(page);
   });
 
-  test('higher monetary value task gets higher score', async ({ page }) => {
-    // Create two tasks via quick-add
-    const lowTask = `Low value task ${Date.now()}`;
-    const highTask = `High value task ${Date.now()}`;
-
+  test('higher monetary value task gets higher score after editing', async ({ page }) => {
+    // Create two tasks
+    const lowTask = `Low value ${Date.now()}`;
+    const highTask = `High value ${Date.now()}`;
     await quickAddTask(page, lowTask);
     await quickAddTask(page, highTask);
 
-    // Navigate to the high-value task to set monetary value
-    await page.click(`text=${highTask}`);
-    // Click the edit icon (pencil)
+    // Edit high-value task to add $500K monetary value
     await page.locator(`a[aria-label="Edit task: ${highTask}"]`).click();
     await page.waitForURL('**/tasks/**');
 
-    // Check if there is a monetary value field and fill it
-    const monetaryField = page.locator('input[type="number"]').first();
-    if (await monetaryField.isVisible()) {
-      // Enable edit mode if needed
-      const editButton = page.locator('button:has-text("Edit")');
-      if (await editButton.isVisible()) {
-        await editButton.click();
-      }
+    // Click edit button if present
+    const editButton = page.locator('button:has-text("Edit")');
+    if (await editButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editButton.click();
     }
 
-    // Go back to tasks list
+    // Find and fill monetary value field
+    const monetaryInput = page.locator('label:has-text("Monetary") + input, label:has-text("monetary") ~ input').first();
+    await monetaryInput.fill('500000');
+    // Submit
+    await page.locator('button:has-text("Save")').click();
+
+    // Wait for reprioritization and go back to task list
+    await page.waitForTimeout(3000);
     await page.goto('/tasks');
     await page.waitForSelector(`text=${highTask}`, { timeout: 15_000 });
 
-    // Both tasks should have score badges
+    // Extract scores
     const highCard = page.locator(`text=${highTask}`).locator('..').locator('..');
     const lowCard = page.locator(`text=${lowTask}`).locator('..').locator('..');
 
-    await expect(highCard.locator('text=Score:')).toBeVisible();
-    await expect(lowCard.locator('text=Score:')).toBeVisible();
+    const highScoreText = await highCard.locator('text=Score:').textContent();
+    const lowScoreText = await lowCard.locator('text=Score:').textContent();
+
+    const highScore = parseInt(highScoreText?.match(/\d+/)?.[0] ?? '0');
+    const lowScore = parseInt(lowScoreText?.match(/\d+/)?.[0] ?? '0');
+
+    expect(highScore).toBeGreaterThan(lowScore);
   });
 
   test('task without monetary value does not show NaN', async ({ page }) => {
-    const taskTitle = `No money task ${Date.now()}`;
+    const taskTitle = `No money ${Date.now()}`;
     await quickAddTask(page, taskTitle);
 
     const taskCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
     const scoreBadge = taskCard.locator('text=Score:');
     await expect(scoreBadge).toBeVisible({ timeout: 10_000 });
 
-    // Score should be a number, not NaN
     const scoreText = await scoreBadge.textContent();
     expect(scoreText).not.toContain('NaN');
   });

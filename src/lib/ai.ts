@@ -280,7 +280,7 @@ MATCHING RULES:
 - "pause X" or "stop working on X" → update_task with updates.status: "todo"
 - Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
-- If no assignee is mentioned, leave assignee as null (the system defaults to the current user)`,
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`,
       },
       {
         role: 'user',
@@ -388,7 +388,7 @@ Rules:
 - Interpret "urgent"/"ASAP" as urgency 8-9
 - Interpret relative dates: "tomorrow", "Friday", "next week", "end of month"
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
-- If no assignee is mentioned, leave assignee as null (the system defaults to the current user)
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)
 - Keep titles concise and actionable
 - Return valid JSON array only, no markdown`,
       },
