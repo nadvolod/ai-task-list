@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/check-pr-reviews.sh",
+            "timeout": 15,
+            "statusMessage": "Checking PR review comments..."
+          }
+        ]
+      }
+    ]
+  }
+}
