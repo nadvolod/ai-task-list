@@ -1,18 +1,16 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, and, desc, isNull, inArray, ne } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 import OpenAI from 'openai';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const userId = parseInt(session.user.id);
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
     logger.info('GET /api/focus', { userId });
 
     // Efficient DB query: fetch only top-level active tasks (todo + doing), ordered by priority, limited

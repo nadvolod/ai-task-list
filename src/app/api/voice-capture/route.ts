@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -11,10 +10,9 @@ import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const userId = parseInt(session.user.id);
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
 
     const formData = await req.formData();
     const audioFile = formData.get('audio') as File | null;
@@ -62,7 +60,7 @@ export async function POST(req: NextRequest) {
           dueDate,
           recurrenceRule: parsed.recurrence_rule ?? null,
           recurrenceDays: parsed.recurrence_days ?? null,
-          assignee: normalizeAssignee(parsed.assignee) ?? defaultAssigneeFromEmail(session.user.email),
+          assignee: normalizeAssignee(parsed.assignee) ?? defaultAssigneeFromEmail(auth.email),
           category: parsed.category ?? null,
         })
         .returning();

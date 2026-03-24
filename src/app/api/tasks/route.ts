@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
@@ -8,12 +7,11 @@ import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const userId = parseInt(session.user.id);
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
     logger.info('GET /api/tasks', { userId });
 
     const userTasks = await db
@@ -31,10 +29,10 @@ export async function GET(_req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
 
-    const userId = parseInt(session.user.id);
     const body = await req.json();
 
     // Input validation
@@ -122,7 +120,7 @@ export async function POST(req: NextRequest) {
         recurrenceDays: body.recurrenceDays ?? null,
         recurrenceEndDate,
         category: typeof body.category === 'string' && body.category.trim() ? body.category.trim() : null,
-        assignee: normalizeAssignee(body.assignee) ?? defaultAssigneeFromEmail(session.user.email),
+        assignee: normalizeAssignee(body.assignee) ?? defaultAssigneeFromEmail(auth.email),
       })
       .returning();
 
