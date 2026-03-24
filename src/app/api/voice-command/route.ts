@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
@@ -66,10 +65,9 @@ function formatDueDate(d: Date | null): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const userId = parseInt(session.user.id);
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
     const formData = await req.formData();
     const audioFile = formData.get('audio') as File | null;
     const speakResponse = formData.get('speak') === 'true';
@@ -98,7 +96,7 @@ export async function POST(req: NextRequest) {
     logger.info('Voice command classified', { userId, intent: intent.intent, transcription: transcription.substring(0, 100) });
 
     // Execute the intent
-    const defaultAssignee = defaultAssigneeFromEmail(session.user.email);
+    const defaultAssignee = defaultAssigneeFromEmail(auth.email);
     const result = await executeIntent(intent, userId, userTasks, defaultAssignee);
 
     // Generate TTS if requested
