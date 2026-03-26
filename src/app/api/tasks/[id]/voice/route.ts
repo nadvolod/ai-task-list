@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -10,10 +9,10 @@ import { logger } from '@/lib/logger';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
 
-    const userId = parseInt(session.user.id);
     const { id } = await params;
     const taskId = parseInt(id);
     if (isNaN(taskId)) return NextResponse.json({ error: 'Invalid task ID' }, { status: 400 });

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { categoryBoosts } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
@@ -8,12 +7,11 @@ import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
 /** GET: list all category boosts for the user */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const userId = parseInt(session.user.id);
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
     const boosts = await db.select().from(categoryBoosts).where(eq(categoryBoosts.userId, userId));
     return NextResponse.json(boosts);
   } catch (err) {
@@ -25,10 +23,10 @@ export async function GET() {
 /** POST: create or update a category boost (upsert) */
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
 
-    const userId = parseInt(session.user.id);
     const body = await req.json();
 
     if (!body.category || typeof body.category !== 'string' || !body.category.trim()) {
@@ -63,10 +61,10 @@ export async function POST(req: NextRequest) {
 /** DELETE: remove a category boost */
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await getAuthUser(req);
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userId = auth.userId;
 
-    const userId = parseInt(session.user.id);
     const { searchParams } = new URL(req.url);
     const rawCategory = searchParams.get('category');
     if (!rawCategory) return NextResponse.json({ error: 'category param required' }, { status: 400 });

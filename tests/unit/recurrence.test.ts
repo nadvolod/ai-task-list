@@ -14,10 +14,15 @@ function toUTCDateString(d: Date): string {
 describe('computeNextDueDate', () => {
   // Use dates far enough in the future to avoid skip-forward logic
   it('daily: returns next day', () => {
-    const base = new Date('2027-06-10T10:00:00Z');
+    // Use a future date so the skip-forward logic doesn't advance past it
+    const tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(10, 0, 0, 0);
     const config: RecurrenceConfig = { rule: 'daily' };
-    const next = computeNextDueDate(base, config);
-    expect(next.getUTCDate()).toBe(11);
+    const next = computeNextDueDate(tomorrow, config);
+    const expectedDate = new Date(tomorrow);
+    expectedDate.setUTCDate(expectedDate.getUTCDate() + 1);
+    expect(next.getUTCDate()).toBe(expectedDate.getUTCDate());
   });
 
   it('daily: skips forward if overdue', () => {
