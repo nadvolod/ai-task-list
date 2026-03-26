@@ -212,37 +212,12 @@ export type VoiceIntent =
   | { intent: 'undo_complete'; task_query: string }
   | { intent: 'unknown'; raw_text: string };
 
-/**
- * Transcribe audio and classify the CEO's intent.
- * Returns the transcription and a structured intent object.
- */
-export async function transcribeAndClassifyIntent(
-  audioBuffer: Buffer,
-  filename: string,
-  existingTaskTitles: string[]
-): Promise<{ transcription: string; intent: VoiceIntent }> {
-  const client = getClient();
-
-  const transcription = await client.audio.transcriptions.create({
-    model: 'whisper-1',
-    file: new File([new Uint8Array(audioBuffer)], filename, { type: 'audio/webm' }),
-    response_format: 'text',
-  });
-
-  const text = typeof transcription === 'string' ? transcription : (transcription as { text: string }).text;
-
+function buildClassificationPrompt(existingTaskTitles: string[]): string {
   const taskListContext = existingTaskTitles.length > 0
     ? `\nThe user's current tasks are:\n${existingTaskTitles.map((t, i) => `${i + 1}. "${t}"`).join('\n')}`
     : '\nThe user has no tasks yet.';
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    max_tokens: 2000,
-    temperature: 0.1,
-    messages: [
-      {
-        role: 'system',
-        content: `You are a voice command router for a CEO's task management app. Classify the user's spoken input into one of these intents and return ONLY valid JSON.
+  return `You are a voice command router for a CEO's task management app. Classify the user's spoken input into one of these intents and return ONLY valid JSON.
 
 Today's date is ${new Date().toISOString().split('T')[0]}.
 ${taskListContext}
@@ -309,28 +284,74 @@ MATCHING RULES:
 - "pause X" or "stop working on X" → update_task with updates.status: "todo"
 - Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
-- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`,
-      },
-      {
-        role: 'user',
-        content: text,
-      },
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`;
+}
+
+function parseIntentResponse(content: string, fallbackText: string): VoiceIntent {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try { return JSON.parse(jsonMatch[0]); } catch { return { intent: 'unknown', raw_text: fallbackText }; }
+    }
+    return { intent: 'unknown', raw_text: fallbackText };
+  }
+}
+
+/**
+ * Classify pre-transcribed text into a VoiceIntent.
+ * Used by real API tests to test classification without audio transcription.
+ */
+export async function classifyTextIntent(
+  text: string,
+  existingTaskTitles: string[]
+): Promise<VoiceIntent> {
+  const client = getClient();
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    max_tokens: 2000,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: buildClassificationPrompt(existingTaskTitles) },
+      { role: 'user', content: text },
+    ],
+  });
+  const content = response.choices[0]?.message?.content ?? '{}';
+  return parseIntentResponse(content, text);
+}
+
+/**
+ * Transcribe audio and classify the CEO's intent.
+ * Returns the transcription and a structured intent object.
+ */
+export async function transcribeAndClassifyIntent(
+  audioBuffer: Buffer,
+  filename: string,
+  existingTaskTitles: string[]
+): Promise<{ transcription: string; intent: VoiceIntent }> {
+  const client = getClient();
+
+  const transcription = await client.audio.transcriptions.create({
+    model: 'whisper-1',
+    file: new File([new Uint8Array(audioBuffer)], filename, { type: 'audio/webm' }),
+    response_format: 'text',
+  });
+
+  const text = typeof transcription === 'string' ? transcription : (transcription as { text: string }).text;
+
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    max_tokens: 2000,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: buildClassificationPrompt(existingTaskTitles) },
+      { role: 'user', content: text },
     ],
   });
 
   const content = response.choices[0]?.message?.content ?? '{}';
-  let intent: VoiceIntent;
-
-  try {
-    intent = JSON.parse(content);
-  } catch {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try { intent = JSON.parse(jsonMatch[0]); } catch { intent = { intent: 'unknown', raw_text: text }; }
-    } else {
-      intent = { intent: 'unknown', raw_text: text };
-    }
-  }
+  const intent = parseIntentResponse(content, text);
 
   return { transcription: text, intent };
 }

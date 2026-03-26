@@ -386,12 +386,12 @@ async function executeIntent(
       }
 
       const { dbUpdates, changes, recordOverride } = buildTaskUpdates(intent.updates, match, userId);
-      await recordOverride();
 
       await db.update(tasks)
         .set(dbUpdates)
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
+      await recordOverride();
       await reprioritizeAllTasks(userId);
 
       const [updated] = await db.select().from(tasks)
@@ -418,11 +418,12 @@ async function executeIntent(
         }
 
         const { dbUpdates, changes, recordOverride } = buildTaskUpdates(item.updates, match, userId);
-        await recordOverride();
 
         await db.update(tasks)
           .set(dbUpdates)
           .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
+
+        await recordOverride();
 
         // Create subtasks if provided
         if (item.subtasks?.length) {

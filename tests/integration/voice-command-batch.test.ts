@@ -23,7 +23,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { NextRequest } from 'next/server';
 import { createTestUser, cleanupTestUser, mockSession, getTestDb } from '../helpers/db';
 import * as schema from '../../src/lib/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 // Shared variable to control which intent the mock returns
 let nextIntentResponse = '{"intent":"unknown","raw_text":"fallback"}';
