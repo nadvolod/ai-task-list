@@ -12,6 +12,7 @@ function toUTCDateString(d: Date): string {
 }
 
 describe('computeNextDueDate', () => {
+  // Use dates far enough in the future to avoid skip-forward logic
   it('daily: returns next day', () => {
     // Use a future date so the skip-forward logic doesn't advance past it
     const tomorrow = new Date();
@@ -32,34 +33,34 @@ describe('computeNextDueDate', () => {
   });
 
   it('weekly: adds 7 days when no specific days given', () => {
-    const base = new Date('2026-03-23T10:00:00Z'); // Monday
+    const base = new Date('2027-06-09T10:00:00Z'); // Monday
     const config: RecurrenceConfig = { rule: 'weekly' };
     const next = computeNextDueDate(base, config);
-    expect(next.getUTCDate()).toBe(30);
+    expect(next.getUTCDate()).toBe(16);
   });
 
   it('weekly: finds next matching weekday', () => {
-    const base = new Date('2026-03-23T10:00:00Z'); // Monday UTC
+    const base = new Date('2027-06-07T10:00:00Z'); // Monday UTC (June 7 2027 is Monday)
     const config: RecurrenceConfig = { rule: 'weekly', days: [3] }; // Wednesday
     const next = computeNextDueDate(base, config);
-    // Next Wednesday after Monday March 23 = March 25
-    expect(next.getUTCDate()).toBe(25);
+    // Next Wednesday after Monday June 7 = June 9
+    expect(next.getUTCDate()).toBe(9);
     const dow = next.getUTCDay() === 0 ? 7 : next.getUTCDay(); // ISO day
     expect(dow).toBe(3); // Wednesday
   });
 
   it('biweekly: adds 14 days when no specific days', () => {
-    const base = new Date('2026-03-23T10:00:00Z');
+    const base = new Date('2027-06-09T10:00:00Z');
     const config: RecurrenceConfig = { rule: 'biweekly' };
     const next = computeNextDueDate(base, config);
-    expect(next.getUTCDate()).toBe(6); // April 6
+    expect(next.getUTCDate()).toBe(23); // June 23
   });
 
   it('monthly: same day next month', () => {
-    const base = new Date('2026-03-15T10:00:00Z');
+    const base = new Date('2027-06-15T10:00:00Z');
     const config: RecurrenceConfig = { rule: 'monthly' };
     const next = computeNextDueDate(base, config);
-    expect(toUTCDateString(next)).toMatch(/^2026-04-15/);
+    expect(toUTCDateString(next)).toMatch(/^2027-07-15/);
   });
 
   it('monthly: handles month with fewer days (Jan 31 → Feb 28)', () => {

@@ -181,11 +181,29 @@ Interpret context clues:
 
 // ─── Voice Command System ───
 
+export interface TaskUpdateFields {
+  title?: string;
+  status?: 'todo' | 'doing' | 'done';
+  due_date?: string;
+  urgency?: number;
+  strategic_value?: number;
+  monetary_value?: number;
+  revenue_potential?: number;
+  description?: string;
+  assignee?: string;
+  priority_override?: number;
+  priority_reason?: string;
+  recurrence_rule?: string;
+  recurrence_days?: string;
+  category?: string;
+}
+
 export type VoiceIntent =
   | { intent: 'create_tasks'; tasks: VoiceCapturedTask[] }
   | { intent: 'complete_task'; task_query: string }
   | { intent: 'start_task'; task_query: string }
-  | { intent: 'update_task'; task_query: string; updates: { title?: string; status?: 'todo' | 'doing' | 'done'; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string; category?: string } }
+  | { intent: 'update_task'; task_query: string; updates: TaskUpdateFields }
+  | { intent: 'batch_update'; updates: Array<{ task_query: string; updates: TaskUpdateFields; subtasks?: Array<{ title: string; description?: string }> }> }
   | { intent: 'delete_task'; task_query: string }
   | { intent: 'delete_all_tasks' }
   | { intent: 'query_briefing' }
@@ -193,6 +211,115 @@ export type VoiceIntent =
   | { intent: 'query_count'; filter?: 'all' | 'overdue' | 'today' | 'high_priority' | 'done' }
   | { intent: 'undo_complete'; task_query: string }
   | { intent: 'unknown'; raw_text: string };
+
+function buildClassificationPrompt(existingTaskTitles: string[]): string {
+  const taskListContext = existingTaskTitles.length > 0
+    ? `\nThe user's current tasks are:\n${existingTaskTitles.map((t, i) => `${i + 1}. "${t}"`).join('\n')}`
+    : '\nThe user has no tasks yet.';
+
+  return `You are a voice command router for a CEO's task management app. Classify the user's spoken input into one of these intents and return ONLY valid JSON.
+
+Today's date is ${new Date().toISOString().split('T')[0]}.
+${taskListContext}
+
+INTENTS:
+
+1. create_tasks — User wants to add new tasks
+   {"intent":"create_tasks","tasks":[{"title":"...","description":"...","monetary_value":N,"revenue_potential":N,"urgency":1-10,"strategic_value":1-10,"due_date":"YYYY-MM-DD"}]}
+
+2. complete_task — User wants to mark a task as done
+   {"intent":"complete_task","task_query":"search string to match task title"}
+
+3. update_task — User wants to change a SINGLE task's details (due date, urgency, assignee, priority, recurrence, etc.)
+   {"intent":"update_task","task_query":"search string","updates":{"due_date":"YYYY-MM-DD","urgency":N,"assignee":"person name","priority_override":0-100,"priority_reason":"why","recurrence_rule":"weekly","recurrence_days":"1,3",...}}
+
+4. batch_update — User mentions updates to MULTIPLE existing tasks in one utterance
+   {"intent":"batch_update","updates":[
+     {"task_query":"search string for task 1","updates":{"description":"context from speech","priority_override":N,"priority_reason":"why",...},"subtasks":[{"title":"actionable follow-up","description":"context"}]},
+     {"task_query":"search string for task 2","updates":{"due_date":"YYYY-MM-DD","description":"context",...}}
+   ]}
+   Use this when the user references 2 or more EXISTING tasks from their task list in one utterance.
+   Each entry follows the same update fields as update_task.
+   Always include a "description" field summarizing what the user said about that task (status update, what happened, what's pending).
+   Add "subtasks" array when the user mentions specific actionable follow-up items for a task.
+
+5. delete_task — User wants to remove a specific task
+   {"intent":"delete_task","task_query":"search string to match task title"}
+
+6. delete_all_tasks — User wants to remove ALL tasks ("delete all", "clear everything", "remove all my tasks")
+   {"intent":"delete_all_tasks"}
+
+7. query_briefing — User asks what to focus on, what's important, a summary
+   {"intent":"query_briefing"}
+
+8. query_tasks — User wants to hear their tasks (optionally filtered)
+   {"intent":"query_tasks","filter":"all|overdue|today|high_priority|done"}
+
+9. query_count — User asks how many tasks they have
+   {"intent":"query_count","filter":"all|overdue|today|high_priority|done"}
+
+10. undo_complete — User wants to reopen a completed task
+   {"intent":"undo_complete","task_query":"search string"}
+
+11. start_task — User is working on a task ("I'm working on X", "started X", "X is in progress")
+   {"intent":"start_task","task_query":"search string"}
+
+12. unknown — Can't determine intent
+   {"intent":"unknown","raw_text":"original text"}
+
+MATCHING RULES:
+- For task_query, use the most distinctive words from the user's speech to match against their task list above
+- "the Acme deal" → task_query: "Acme deal"
+- "mark it done" without specifying which task → ask by returning unknown with helpful raw_text
+- If the user says something that could be a new task OR a command, prefer the command interpretation if it matches an existing task
+- "by Friday" "next week" "tomorrow" → convert to ISO dates for due_date
+- Multiple new tasks in one utterance → create_tasks with multiple items in the array
+- If the user provides status updates on 2 or more EXISTING tasks in one utterance → batch_update. Each task's updates should include a "description" summarizing what the user said, plus priority_override/due_date/status if mentioned. Example: "On the Flagler sale, I emailed revisions. For Art's contract, make it top priority." → batch_update with 2 entries.
+- "assign X to Y" or "Y is responsible for X" → update_task with updates.assignee
+- "make X my top priority" or "X is the most important" → update_task with priority_override: 95, priority_reason explaining why
+- "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"
+- "this should be higher priority because..." → update_task with priority_override and priority_reason
+- "categorize X as Temporal" or "this is a Temporal task" → update_task with category
+- "I'm working on X" or "I started X" or "X is in progress" → start_task
+- "pause X" or "stop working on X" → update_task with updates.status: "todo"
+- Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
+- ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`;
+}
+
+function parseIntentResponse(content: string, fallbackText: string): VoiceIntent {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try { return JSON.parse(jsonMatch[0]); } catch { return { intent: 'unknown', raw_text: fallbackText }; }
+    }
+    return { intent: 'unknown', raw_text: fallbackText };
+  }
+}
+
+/**
+ * Classify pre-transcribed text into a VoiceIntent.
+ * Used by real API tests to test classification without audio transcription.
+ */
+export async function classifyTextIntent(
+  text: string,
+  existingTaskTitles: string[]
+): Promise<VoiceIntent> {
+  const client = getClient();
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    max_tokens: 2000,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: buildClassificationPrompt(existingTaskTitles) },
+      { role: 'user', content: text },
+    ],
+  });
+  const content = response.choices[0]?.message?.content ?? '{}';
+  return parseIntentResponse(content, text);
+}
 
 /**
  * Transcribe audio and classify the CEO's intent.
@@ -213,95 +340,18 @@ export async function transcribeAndClassifyIntent(
 
   const text = typeof transcription === 'string' ? transcription : (transcription as { text: string }).text;
 
-  const taskListContext = existingTaskTitles.length > 0
-    ? `\nThe user's current tasks are:\n${existingTaskTitles.map((t, i) => `${i + 1}. "${t}"`).join('\n')}`
-    : '\nThe user has no tasks yet.';
-
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
-    max_tokens: 800,
+    max_tokens: 2000,
     temperature: 0.1,
     messages: [
-      {
-        role: 'system',
-        content: `You are a voice command router for a CEO's task management app. Classify the user's spoken input into one of these intents and return ONLY valid JSON.
-
-Today's date is ${new Date().toISOString().split('T')[0]}.
-${taskListContext}
-
-INTENTS:
-
-1. create_tasks — User wants to add new tasks
-   {"intent":"create_tasks","tasks":[{"title":"...","description":"...","monetary_value":N,"revenue_potential":N,"urgency":1-10,"strategic_value":1-10,"due_date":"YYYY-MM-DD"}]}
-
-2. complete_task — User wants to mark a task as done
-   {"intent":"complete_task","task_query":"search string to match task title"}
-
-3. update_task — User wants to change a task's details (due date, urgency, assignee, priority, recurrence, etc.)
-   {"intent":"update_task","task_query":"search string","updates":{"due_date":"YYYY-MM-DD","urgency":N,"assignee":"person name","priority_override":0-100,"priority_reason":"why","recurrence_rule":"weekly","recurrence_days":"1,3",...}}
-
-4. delete_task — User wants to remove a specific task
-   {"intent":"delete_task","task_query":"search string to match task title"}
-
-5. delete_all_tasks — User wants to remove ALL tasks ("delete all", "clear everything", "remove all my tasks")
-   {"intent":"delete_all_tasks"}
-
-6. query_briefing — User asks what to focus on, what's important, a summary
-   {"intent":"query_briefing"}
-
-7. query_tasks — User wants to hear their tasks (optionally filtered)
-   {"intent":"query_tasks","filter":"all|overdue|today|high_priority|done"}
-
-8. query_count — User asks how many tasks they have
-   {"intent":"query_count","filter":"all|overdue|today|high_priority|done"}
-
-9. undo_complete — User wants to reopen a completed task
-   {"intent":"undo_complete","task_query":"search string"}
-
-10. start_task — User is working on a task ("I'm working on X", "started X", "X is in progress")
-   {"intent":"start_task","task_query":"search string"}
-
-11. unknown — Can't determine intent
-   {"intent":"unknown","raw_text":"original text"}
-
-MATCHING RULES:
-- For task_query, use the most distinctive words from the user's speech to match against their task list above
-- "the Acme deal" → task_query: "Acme deal"
-- "mark it done" without specifying which task → ask by returning unknown with helpful raw_text
-- If the user says something that could be a new task OR a command, prefer the command interpretation if it matches an existing task
-- "by Friday" "next week" "tomorrow" → convert to ISO dates for due_date
-- Multiple new tasks in one utterance → create_tasks with multiple items in the array
-- "assign X to Y" or "Y is responsible for X" → update_task with updates.assignee
-- "make X my top priority" or "X is the most important" → update_task with priority_override: 95, priority_reason explaining why
-- "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"
-- "this should be higher priority because..." → update_task with priority_override and priority_reason
-- "categorize X as Temporal" or "this is a Temporal task" → update_task with category
-- "I'm working on X" or "I started X" or "X is in progress" → start_task
-- "pause X" or "stop working on X" → update_task with updates.status: "todo"
-- Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
-- ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
-- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`,
-      },
-      {
-        role: 'user',
-        content: text,
-      },
+      { role: 'system', content: buildClassificationPrompt(existingTaskTitles) },
+      { role: 'user', content: text },
     ],
   });
 
   const content = response.choices[0]?.message?.content ?? '{}';
-  let intent: VoiceIntent;
-
-  try {
-    intent = JSON.parse(content);
-  } catch {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try { intent = JSON.parse(jsonMatch[0]); } catch { intent = { intent: 'unknown', raw_text: text }; }
-    } else {
-      intent = { intent: 'unknown', raw_text: text };
-    }
-  }
+  const intent = parseIntentResponse(content, text);
 
   return { transcription: text, intent };
 }

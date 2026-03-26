@@ -3,7 +3,7 @@ import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent } from '@/lib/ai';
+import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent, type TaskUpdateFields } from '@/lib/ai';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { spawnNextRecurringInstance } from '@/lib/task-operations';
 import { priorityOverrides } from '@/lib/db/schema';
@@ -130,11 +130,90 @@ interface CommandResult {
   spokenResponse: string;
   tasksCreated?: TaskRow[];
   taskUpdated?: TaskRow;
+  tasksUpdated?: TaskRow[];
   taskDeleted?: number;
   allTasksDeleted?: boolean;
   tasksList?: TaskRow[];
   count?: number;
   summary?: string;
+}
+
+function buildTaskUpdates(
+  intentUpdates: TaskUpdateFields,
+  match: TaskRow,
+  userId: number
+): { dbUpdates: Record<string, unknown>; changes: string[]; recordOverride: () => Promise<void> } {
+  const dbUpdates: Record<string, unknown> = { updatedAt: new Date() };
+  const changes: string[] = [];
+  let overrideFn: (() => Promise<void>) | null = null;
+
+  if (intentUpdates.status && ['todo', 'doing', 'done'].includes(intentUpdates.status)) {
+    dbUpdates.status = intentUpdates.status;
+    changes.push(`status to ${intentUpdates.status}`);
+  }
+  if (intentUpdates.due_date) {
+    const d = new Date(intentUpdates.due_date);
+    if (!isNaN(d.getTime())) {
+      dbUpdates.dueDate = d;
+      changes.push(`due date to ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`);
+    }
+  }
+  if (intentUpdates.urgency != null) {
+    dbUpdates.urgency = Math.max(1, Math.min(10, Math.round(intentUpdates.urgency)));
+    changes.push(`urgency to ${dbUpdates.urgency}`);
+  }
+  if (intentUpdates.strategic_value != null) {
+    dbUpdates.strategicValue = Math.max(1, Math.min(10, Math.round(intentUpdates.strategic_value)));
+    changes.push(`strategic value to ${dbUpdates.strategicValue}`);
+  }
+  if (intentUpdates.monetary_value != null) {
+    dbUpdates.monetaryValue = Math.max(0, intentUpdates.monetary_value);
+    changes.push(`monetary value to $${(dbUpdates.monetaryValue as number).toLocaleString()}`);
+  }
+  if (intentUpdates.revenue_potential != null) {
+    dbUpdates.revenuePotential = Math.max(0, intentUpdates.revenue_potential);
+    changes.push(`revenue potential to $${(dbUpdates.revenuePotential as number).toLocaleString()}`);
+  }
+  if (intentUpdates.title) {
+    dbUpdates.title = intentUpdates.title;
+    changes.push(`title to "${intentUpdates.title}"`);
+  }
+  if (intentUpdates.description) {
+    dbUpdates.description = intentUpdates.description;
+    changes.push('description');
+  }
+  if (intentUpdates.assignee) {
+    dbUpdates.assignee = intentUpdates.assignee;
+    changes.push(`assigned to ${intentUpdates.assignee}`);
+  }
+  if (intentUpdates.category) {
+    dbUpdates.category = intentUpdates.category;
+    changes.push(`category to "${intentUpdates.category}"`);
+  }
+  if (intentUpdates.recurrence_rule) {
+    dbUpdates.recurrenceRule = intentUpdates.recurrence_rule;
+    if (intentUpdates.recurrence_days) {
+      dbUpdates.recurrenceDays = intentUpdates.recurrence_days;
+    }
+    changes.push(`set to recurring: ${intentUpdates.recurrence_rule}`);
+  }
+  if (intentUpdates.priority_override != null) {
+    const score = Math.min(100, Math.max(0, Math.round(intentUpdates.priority_override)));
+    dbUpdates.manualPriorityScore = score;
+    dbUpdates.manualPriorityReason = intentUpdates.priority_reason ?? 'Set via voice command';
+    changes.push(`priority manually set to ${score}`);
+
+    overrideFn = () => db.insert(priorityOverrides).values({
+      taskId: match.id,
+      userId,
+      previousScore: match.priorityScore,
+      newScore: score,
+      reason: intentUpdates.priority_reason ?? 'Set via voice command',
+      source: 'voice',
+    }).then(() => {});
+  }
+
+  return { dbUpdates, changes, recordOverride: overrideFn ?? (() => Promise.resolve()) };
 }
 
 async function executeIntent(
@@ -304,84 +383,15 @@ async function executeIntent(
         };
       }
 
-      const updates: Record<string, unknown> = { updatedAt: new Date() };
-      const changes: string[] = [];
-
-      if (intent.updates.status && ['todo', 'doing', 'done'].includes(intent.updates.status)) {
-        updates.status = intent.updates.status;
-        changes.push(`status to ${intent.updates.status}`);
-      }
-      if (intent.updates.due_date) {
-        const d = new Date(intent.updates.due_date);
-        if (!isNaN(d.getTime())) {
-          updates.dueDate = d;
-          changes.push(`due date to ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`);
-        }
-      }
-      if (intent.updates.urgency != null) {
-        updates.urgency = Math.max(1, Math.min(10, Math.round(intent.updates.urgency)));
-        changes.push(`urgency to ${updates.urgency}`);
-      }
-      if (intent.updates.strategic_value != null) {
-        updates.strategicValue = Math.max(1, Math.min(10, Math.round(intent.updates.strategic_value)));
-        changes.push(`strategic value to ${updates.strategicValue}`);
-      }
-      if (intent.updates.monetary_value != null) {
-        updates.monetaryValue = Math.max(0, intent.updates.monetary_value);
-        changes.push(`monetary value to $${(updates.monetaryValue as number).toLocaleString()}`);
-      }
-      if (intent.updates.revenue_potential != null) {
-        updates.revenuePotential = Math.max(0, intent.updates.revenue_potential);
-        changes.push(`revenue potential to $${(updates.revenuePotential as number).toLocaleString()}`);
-      }
-      if (intent.updates.title) {
-        updates.title = intent.updates.title;
-        changes.push(`title to "${intent.updates.title}"`);
-      }
-      if (intent.updates.description) {
-        updates.description = intent.updates.description;
-        changes.push('description');
-      }
-      if (intent.updates.assignee) {
-        updates.assignee = intent.updates.assignee;
-        changes.push(`assigned to ${intent.updates.assignee}`);
-      }
-      if (intent.updates.category) {
-        updates.category = intent.updates.category;
-        changes.push(`category to "${intent.updates.category}"`);
-      }
-      if (intent.updates.recurrence_rule) {
-        updates.recurrenceRule = intent.updates.recurrence_rule;
-        if (intent.updates.recurrence_days) {
-          updates.recurrenceDays = intent.updates.recurrence_days;
-        }
-        changes.push(`set to recurring: ${intent.updates.recurrence_rule}`);
-      }
-      if (intent.updates.priority_override != null) {
-        const score = Math.min(100, Math.max(0, Math.round(intent.updates.priority_override)));
-        updates.manualPriorityScore = score;
-        updates.manualPriorityReason = intent.updates.priority_reason ?? 'Set via voice command';
-        changes.push(`priority manually set to ${score}`);
-
-        // Record in priority override history
-        await db.insert(priorityOverrides).values({
-          taskId: match.id,
-          userId,
-          previousScore: match.priorityScore,
-          newScore: score,
-          reason: intent.updates.priority_reason ?? 'Set via voice command',
-          source: 'voice',
-        });
-      }
+      const { dbUpdates, changes, recordOverride } = buildTaskUpdates(intent.updates, match, userId);
 
       await db.update(tasks)
-        .set(updates)
+        .set(dbUpdates)
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
-      // Re-rank all tasks relative to each other
+      await recordOverride();
       await reprioritizeAllTasks(userId);
 
-      // Re-fetch to get updated score
       const [updated] = await db.select().from(tasks)
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
@@ -389,6 +399,83 @@ async function executeIntent(
         action: 'updated',
         spokenResponse: `Updated "${match.title}": ${changes.join(', ')}. Priority score is now ${Math.round(updated.priorityScore)}.`,
         taskUpdated: updated,
+      };
+    }
+
+    case 'batch_update': {
+      logger.info('Voice batch_update', { userId, count: intent.updates.length });
+      const updatedTaskIds: number[] = [];
+      const changesSummary: string[] = [];
+      const notFound: string[] = [];
+
+      for (const item of intent.updates) {
+        const match = fuzzyMatch(item.task_query, userTasks);
+        if (!match) {
+          notFound.push(item.task_query);
+          continue;
+        }
+
+        const { dbUpdates, changes, recordOverride } = buildTaskUpdates(item.updates, match, userId);
+
+        await db.update(tasks)
+          .set(dbUpdates)
+          .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
+
+        await recordOverride();
+
+        // Create subtasks if provided
+        if (item.subtasks?.length) {
+          // Get current max subtask order for this parent
+          const existingSubtasks = await db.select()
+            .from(tasks)
+            .where(and(eq(tasks.parentId, match.id), eq(tasks.userId, userId)));
+          let nextOrder = existingSubtasks.length;
+
+          for (const sub of item.subtasks) {
+            if (!sub.title?.trim()) continue;
+            await db.insert(tasks).values({
+              userId,
+              title: sub.title.trim(),
+              description: sub.description || null,
+              sourceType: 'voice_context',
+              parentId: match.id,
+              subtaskOrder: nextOrder++,
+            });
+          }
+        }
+
+        updatedTaskIds.push(match.id);
+        changesSummary.push(`"${match.title}": ${changes.join(', ')}`);
+      }
+
+      // ONE reprioritization call after all updates
+      if (updatedTaskIds.length > 0) {
+        await reprioritizeAllTasks(userId);
+      }
+
+      // Re-fetch all updated tasks with final scores
+      const refreshed: TaskRow[] = [];
+      for (const id of updatedTaskIds) {
+        const [t] = await db.select().from(tasks)
+          .where(and(eq(tasks.id, id), eq(tasks.userId, userId)));
+        if (t) refreshed.push(t);
+      }
+
+      let spoken = `Updated ${refreshed.length} task${refreshed.length !== 1 ? 's' : ''}. `;
+      spoken += changesSummary.join('. ') + '.';
+      if (notFound.length > 0) {
+        spoken += ` Could not find: ${notFound.join(', ')}.`;
+      }
+
+      logger.info('Voice batch_update complete', {
+        userId, updated: refreshed.length, notFound: notFound.length,
+        taskIds: updatedTaskIds,
+      });
+
+      return {
+        action: 'batch_updated',
+        spokenResponse: spoken,
+        tasksUpdated: refreshed,
       };
     }
 
