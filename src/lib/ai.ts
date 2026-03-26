@@ -181,11 +181,29 @@ Interpret context clues:
 
 // ─── Voice Command System ───
 
+export interface TaskUpdateFields {
+  title?: string;
+  status?: 'todo' | 'doing' | 'done';
+  due_date?: string;
+  urgency?: number;
+  strategic_value?: number;
+  monetary_value?: number;
+  revenue_potential?: number;
+  description?: string;
+  assignee?: string;
+  priority_override?: number;
+  priority_reason?: string;
+  recurrence_rule?: string;
+  recurrence_days?: string;
+  category?: string;
+}
+
 export type VoiceIntent =
   | { intent: 'create_tasks'; tasks: VoiceCapturedTask[] }
   | { intent: 'complete_task'; task_query: string }
   | { intent: 'start_task'; task_query: string }
-  | { intent: 'update_task'; task_query: string; updates: { title?: string; status?: 'todo' | 'doing' | 'done'; due_date?: string; urgency?: number; strategic_value?: number; monetary_value?: number; revenue_potential?: number; description?: string; assignee?: string; priority_override?: number; priority_reason?: string; recurrence_rule?: string; recurrence_days?: string; category?: string } }
+  | { intent: 'update_task'; task_query: string; updates: TaskUpdateFields }
+  | { intent: 'batch_update'; updates: Array<{ task_query: string; updates: TaskUpdateFields; subtasks?: Array<{ title: string; description?: string }> }> }
   | { intent: 'delete_task'; task_query: string }
   | { intent: 'delete_all_tasks' }
   | { intent: 'query_briefing' }
@@ -219,7 +237,7 @@ export async function transcribeAndClassifyIntent(
 
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
-    max_tokens: 800,
+    max_tokens: 2000,
     temperature: 0.1,
     messages: [
       {
@@ -237,31 +255,41 @@ INTENTS:
 2. complete_task — User wants to mark a task as done
    {"intent":"complete_task","task_query":"search string to match task title"}
 
-3. update_task — User wants to change a task's details (due date, urgency, assignee, priority, recurrence, etc.)
+3. update_task — User wants to change a SINGLE task's details (due date, urgency, assignee, priority, recurrence, etc.)
    {"intent":"update_task","task_query":"search string","updates":{"due_date":"YYYY-MM-DD","urgency":N,"assignee":"person name","priority_override":0-100,"priority_reason":"why","recurrence_rule":"weekly","recurrence_days":"1,3",...}}
 
-4. delete_task — User wants to remove a specific task
+4. batch_update — User mentions updates to MULTIPLE existing tasks in one utterance
+   {"intent":"batch_update","updates":[
+     {"task_query":"search string for task 1","updates":{"description":"context from speech","priority_override":N,"priority_reason":"why",...},"subtasks":[{"title":"actionable follow-up","description":"context"}]},
+     {"task_query":"search string for task 2","updates":{"due_date":"YYYY-MM-DD","description":"context",...}}
+   ]}
+   Use this when the user references 2 or more EXISTING tasks from their task list in one utterance.
+   Each entry follows the same update fields as update_task.
+   Always include a "description" field summarizing what the user said about that task (status update, what happened, what's pending).
+   Add "subtasks" array when the user mentions specific actionable follow-up items for a task.
+
+5. delete_task — User wants to remove a specific task
    {"intent":"delete_task","task_query":"search string to match task title"}
 
-5. delete_all_tasks — User wants to remove ALL tasks ("delete all", "clear everything", "remove all my tasks")
+6. delete_all_tasks — User wants to remove ALL tasks ("delete all", "clear everything", "remove all my tasks")
    {"intent":"delete_all_tasks"}
 
-6. query_briefing — User asks what to focus on, what's important, a summary
+7. query_briefing — User asks what to focus on, what's important, a summary
    {"intent":"query_briefing"}
 
-7. query_tasks — User wants to hear their tasks (optionally filtered)
+8. query_tasks — User wants to hear their tasks (optionally filtered)
    {"intent":"query_tasks","filter":"all|overdue|today|high_priority|done"}
 
-8. query_count — User asks how many tasks they have
+9. query_count — User asks how many tasks they have
    {"intent":"query_count","filter":"all|overdue|today|high_priority|done"}
 
-9. undo_complete — User wants to reopen a completed task
+10. undo_complete — User wants to reopen a completed task
    {"intent":"undo_complete","task_query":"search string"}
 
-10. start_task — User is working on a task ("I'm working on X", "started X", "X is in progress")
+11. start_task — User is working on a task ("I'm working on X", "started X", "X is in progress")
    {"intent":"start_task","task_query":"search string"}
 
-11. unknown — Can't determine intent
+12. unknown — Can't determine intent
    {"intent":"unknown","raw_text":"original text"}
 
 MATCHING RULES:
@@ -271,6 +299,7 @@ MATCHING RULES:
 - If the user says something that could be a new task OR a command, prefer the command interpretation if it matches an existing task
 - "by Friday" "next week" "tomorrow" → convert to ISO dates for due_date
 - Multiple new tasks in one utterance → create_tasks with multiple items in the array
+- If the user provides status updates on 2 or more EXISTING tasks in one utterance → batch_update. Each task's updates should include a "description" summarizing what the user said, plus priority_override/due_date/status if mentioned. Example: "On the Flagler sale, I emailed revisions. For Art's contract, make it top priority." → batch_update with 2 entries.
 - "assign X to Y" or "Y is responsible for X" → update_task with updates.assignee
 - "make X my top priority" or "X is the most important" → update_task with priority_override: 95, priority_reason explaining why
 - "make X recurring every Monday" → update_task with recurrence_rule: "weekly", recurrence_days: "1"

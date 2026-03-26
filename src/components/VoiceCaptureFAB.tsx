@@ -11,6 +11,7 @@ interface VoiceCommandResponse {
   speechUrl?: string | null;
   tasksCreated?: Task[];
   taskUpdated?: Task;
+  tasksUpdated?: Task[];
   taskDeleted?: number;
   allTasksDeleted?: boolean;
   tasksList?: Task[];
@@ -154,6 +155,12 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
         if (data.taskUpdated) {
           onTaskUpdated(data.taskUpdated);
           setToast(data.action === 'completed' ? 'Task completed' : data.action === 'updated' ? 'Task updated' : 'Task reopened');
+        }
+        break;
+      case 'batch_updated':
+        if (data.tasksUpdated?.length) {
+          onRefreshRequested();
+          setToast(`Updated ${data.tasksUpdated.length} tasks`);
         }
         break;
       case 'deleted':
