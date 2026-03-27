@@ -111,6 +111,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     if (!res.ok) {
       setTasks(prevTasks);
+    } else {
+      setFocusRefreshKey(k => k + 1);
     }
     setLoading(null);
   }
@@ -131,6 +133,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
       setTasks(prev => [newTask, ...prev]);
       setQuickAddTitle('');
       setQuickAddOpen(false);
+      setFocusRefreshKey(k => k + 1);
     }
     setQuickAddLoading(false);
   }
@@ -157,18 +160,22 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
   function handleVoiceTasksCreated(newTasks: Task[]) {
     setTasks(prev => [...newTasks, ...prev]);
+    setFocusRefreshKey(k => k + 1);
   }
 
   function handleVoiceTaskUpdated(updated: Task) {
     setTasks(prev => prev.map(t => t.id === updated.id ? { ...updated, dueDate: updated.dueDate ?? null } : t));
+    setFocusRefreshKey(k => k + 1);
   }
 
   function handleVoiceTaskDeleted(taskId: number) {
     setTasks(prev => prev.filter(t => t.id !== taskId));
+    setFocusRefreshKey(k => k + 1);
   }
 
   function handleAllTasksDeleted() {
     setTasks([]);
+    setFocusRefreshKey(k => k + 1);
   }
 
   async function handleRefreshRequested() {
