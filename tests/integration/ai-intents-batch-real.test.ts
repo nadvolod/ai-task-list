@@ -174,6 +174,8 @@ describe('Real OpenAI intent classification — batch_update', () => {
       u.task_query.toLowerCase().includes('investor') || u.task_query.toLowerCase().includes('quarterly')
     );
     expect(investor).toBeDefined();
+    // Explicit ownership assignment should map to updates.assignee
+    expect(typeof investor.updates.assignee).toBe('string');
     expect(investor.updates.assignee).toMatch(/michael/i);
 
     // DevOps onboarding: priority boost
