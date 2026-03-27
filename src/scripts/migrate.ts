@@ -124,6 +124,9 @@ async function migrate() {
   // Migration: project field (Issue #22)
   await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project TEXT`;
 
+  // Migration: revenue type field (Issue #27) — 'onetime' | 'mrr' | 'arr'
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS revenue_type TEXT`;
+
   console.log('Migration complete!');
 }
 

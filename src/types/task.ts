@@ -7,6 +7,7 @@ export interface Task {
   priorityReason: string | null;
   monetaryValue: number | null;
   revenuePotential: number | null;
+  revenueType: string | null;
   urgency: number | null;
   strategicValue: number | null;
   confidence: number | null;

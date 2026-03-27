@@ -117,6 +117,7 @@ export async function POST(req: NextRequest) {
         sourceType: body.sourceType ?? 'manual',
         monetaryValue: body.monetaryValue,
         revenuePotential: body.revenuePotential,
+        revenueType: ['onetime', 'mrr', 'arr'].includes(body.revenueType) ? body.revenueType : null,
         urgency: body.urgency,
         strategicValue: body.strategicValue,
         confidence: body.confidence,
