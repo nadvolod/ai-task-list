@@ -1,5 +1,8 @@
 # AI Task List Creator
 
+[![CI](https://github.com/nadvolod/ai-task-list/actions/workflows/ci.yml/badge.svg)](https://github.com/nadvolod/ai-task-list/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A mobile-first intelligent task capture and prioritization system. Upload an image of your task list, use voice notes to add context, and let AI rank tasks by monetary impact and strategic value.
 
 ## Architecture
@@ -56,6 +59,7 @@ DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 NEXTAUTH_SECRET=your-secret-here-generate-with-openssl-rand-base64-32
 NEXTAUTH_URL=http://localhost:3000
 OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=your-google-api-key-here
 ```
 
 ## Local Setup
@@ -104,6 +108,7 @@ OPENAI_API_KEY=sk-...
    - `NEXTAUTH_SECRET` (generate: `openssl rand -base64 32`)
    - `NEXTAUTH_URL` (set to your Vercel domain, e.g., `https://ai-task-list.vercel.app`)
    - `OPENAI_API_KEY`
+   - `GOOGLE_API_KEY`
 4. Deploy. Vercel will automatically run `npm run build`.
 5. After first deploy, run `npm run db:migrate` locally pointing at the production DB.
 
@@ -116,8 +121,21 @@ OPENAI_API_KEY=sk-...
 - Native mobile app
 - Advanced analytics
 - Billing/subscription
-- Subtasks
 - Labels, tags, projects
 - Offline mode
 - AI chat assistant
 - Bulk import / CSV export
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+To report a vulnerability, please see [SECURITY.md](SECURITY.md).
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

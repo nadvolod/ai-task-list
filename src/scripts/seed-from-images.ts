@@ -21,59 +21,59 @@ async function seedFromImages() {
   await sql`DELETE FROM uploads WHERE user_id = ${userId}`;
   console.log('Cleared existing tasks for demo user.');
 
-  // All tasks merged from both images, deduplicated
+  // Sample tasks covering various priority scoring patterns
   const allTasks = [
     // Financial / Money Protection (highest priority)
-    { title: 'Fight Venmo charge - $1,000', monetary_value: 1000, urgency: 9, strategic_value: 5, revenue_potential: null },
-    { title: 'Email Emma to cancel lease & recover $4,800', monetary_value: 4800, urgency: 8, strategic_value: 6, revenue_potential: null },
-    { title: 'Insurance payment + $4,300', monetary_value: 4300, urgency: 7, strategic_value: 5, revenue_potential: null },
-    { title: 'End of spot - recover $500', monetary_value: 500, urgency: 6, strategic_value: 3, revenue_potential: null },
-    { title: 'Monthly electric charge - $115', monetary_value: 115, urgency: 5, strategic_value: 2, revenue_potential: null },
-    { title: 'Failed payment - Loan Depot', monetary_value: null, urgency: 9, strategic_value: 5, revenue_potential: null },
-    { title: 'Failed payment - Penny Mac', monetary_value: null, urgency: 9, strategic_value: 5, revenue_potential: null },
-    { title: 'Balance WHO contract - Discover CC - $7K', monetary_value: 7000, urgency: 7, strategic_value: 6, revenue_potential: null },
+    { title: 'Dispute unauthorized charge - $1,000', monetary_value: 1000, urgency: 9, strategic_value: 5, revenue_potential: null },
+    { title: 'Cancel lease & recover security deposit - $4,800', monetary_value: 4800, urgency: 8, strategic_value: 6, revenue_potential: null },
+    { title: 'Process insurance reimbursement - $4,300', monetary_value: 4300, urgency: 7, strategic_value: 5, revenue_potential: null },
+    { title: 'Recover parking deposit - $500', monetary_value: 500, urgency: 6, strategic_value: 3, revenue_potential: null },
+    { title: 'Review monthly utility bill - $115', monetary_value: 115, urgency: 5, strategic_value: 2, revenue_potential: null },
+    { title: 'Resolve failed mortgage payment', monetary_value: null, urgency: 9, strategic_value: 5, revenue_potential: null },
+    { title: 'Fix failed auto-loan payment', monetary_value: null, urgency: 9, strategic_value: 5, revenue_potential: null },
+    { title: 'Pay off credit card balance - $7K', monetary_value: 7000, urgency: 7, strategic_value: 6, revenue_potential: null },
 
     // Revenue / Business (high priority)
-    { title: 'Arts contract after March 31 - $12K', monetary_value: null, urgency: 8, strategic_value: 8, revenue_potential: 12000 },
-    { title: "Tricor's course - $10K", monetary_value: null, urgency: 7, strategic_value: 8, revenue_potential: 10000 },
-    { title: "Vitho webinar for Tricor's - $12K", monetary_value: null, urgency: 6, strategic_value: 7, revenue_potential: 12000 },
-    { title: 'Flight sale opportunity - $78,000/yr', monetary_value: null, urgency: 5, strategic_value: 9, revenue_potential: 78000 },
-    { title: 'New line for Devonshire - $75K', monetary_value: null, urgency: 5, strategic_value: 8, revenue_potential: 75000 },
-    { title: 'Equity line for Devonshire', monetary_value: null, urgency: 5, strategic_value: 7, revenue_potential: null },
+    { title: 'Finalize consulting contract - $12K', monetary_value: null, urgency: 8, strategic_value: 8, revenue_potential: 12000 },
+    { title: 'Launch online course - $10K', monetary_value: null, urgency: 7, strategic_value: 8, revenue_potential: 10000 },
+    { title: 'Host partner webinar - $12K', monetary_value: null, urgency: 6, strategic_value: 7, revenue_potential: 12000 },
+    { title: 'Pursue enterprise sales lead - $78K/yr', monetary_value: null, urgency: 5, strategic_value: 9, revenue_potential: 78000 },
+    { title: 'Open new credit line for rental property - $75K', monetary_value: null, urgency: 5, strategic_value: 8, revenue_potential: 75000 },
+    { title: 'Research equity line options for rental property', monetary_value: null, urgency: 5, strategic_value: 7, revenue_potential: null },
 
     // Insurance
-    { title: 'Analyze all insurance quotes: Tier 2 - $60/mo', monetary_value: 720, urgency: 6, strategic_value: 6, revenue_potential: null },
-    { title: 'Insurance Quotes - $3,600/yr - Andrea from All State', monetary_value: 3600, urgency: 5, strategic_value: 6, revenue_potential: null },
-    { title: 'Home insurance for Devonshire - Soliant (emailed, waiting)', monetary_value: null, urgency: 5, strategic_value: 6, revenue_potential: null },
+    { title: 'Compare insurance quotes: Tier 2 - $60/mo', monetary_value: 720, urgency: 6, strategic_value: 6, revenue_potential: null },
+    { title: 'Review home insurance quotes - $3,600/yr', monetary_value: 3600, urgency: 5, strategic_value: 6, revenue_potential: null },
+    { title: 'Follow up on rental property insurance (waiting on agent)', monetary_value: null, urgency: 5, strategic_value: 6, revenue_potential: null },
 
     // Medical / Professional
-    { title: 'Dr Scott from Klarity - $125 (waiting for response)', monetary_value: 125, urgency: 6, strategic_value: 4, revenue_potential: null },
-    { title: 'Get back from Dr - Klarity', monetary_value: null, urgency: 5, strategic_value: 4, revenue_potential: null },
-    { title: 'Dan - Dept March', monetary_value: null, urgency: 6, strategic_value: 4, revenue_potential: null },
+    { title: 'Follow up with specialist - $125 copay', monetary_value: 125, urgency: 6, strategic_value: 4, revenue_potential: null },
+    { title: 'Schedule follow-up appointment', monetary_value: null, urgency: 5, strategic_value: 4, revenue_potential: null },
+    { title: 'Submit expense report by end of month', monetary_value: null, urgency: 6, strategic_value: 4, revenue_potential: null },
 
-    // Property / Devonshire
-    { title: 'Get bare bones steps in Devonshire', monetary_value: null, urgency: 5, strategic_value: 6, revenue_potential: null },
-    { title: 'Log Dream steps', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
-    { title: 'Other house stuff', monetary_value: null, urgency: 3, strategic_value: 3, revenue_potential: null },
-    { title: 'Fence - Trunk', monetary_value: null, urgency: 3, strategic_value: 3, revenue_potential: null },
-    { title: 'Apts $5,000 deposit info', monetary_value: 5000, urgency: 5, strategic_value: 5, revenue_potential: null },
-    { title: '$5,000 deposit into ND', monetary_value: 5000, urgency: 5, strategic_value: 5, revenue_potential: null },
+    // Property
+    { title: 'Get renovation cost estimates', monetary_value: null, urgency: 5, strategic_value: 6, revenue_potential: null },
+    { title: 'Document project milestones', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
+    { title: 'Schedule home maintenance', monetary_value: null, urgency: 3, strategic_value: 3, revenue_potential: null },
+    { title: 'Get fence repair quotes', monetary_value: null, urgency: 3, strategic_value: 3, revenue_potential: null },
+    { title: 'Research apartment deposit terms - $5,000', monetary_value: 5000, urgency: 5, strategic_value: 5, revenue_potential: null },
+    { title: 'Transfer $5,000 deposit to savings', monetary_value: 5000, urgency: 5, strategic_value: 5, revenue_potential: null },
 
     // Work / Professional Development
-    { title: 'Kasya auto-pay setup', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
-    { title: 'NVIDIA interview prep', monetary_value: null, urgency: 7, strategic_value: 9, revenue_potential: null },
-    { title: 'Virtuoso tutorial', monetary_value: null, urgency: 4, strategic_value: 5, revenue_potential: null },
-    { title: 'Record', monetary_value: null, urgency: 4, strategic_value: 4, revenue_potential: null },
-    { title: 'Plan new set of Nlog Playr + Devonshire', monetary_value: null, urgency: 4, strategic_value: 5, revenue_potential: null },
-    { title: 'Finalize YT quality checklist for Temporal', monetary_value: null, urgency: 6, strategic_value: 7, revenue_potential: null },
-    { title: 'Temporal Replay conference', monetary_value: null, urgency: 5, strategic_value: 6, revenue_potential: null },
+    { title: 'Set up auto-pay for subscriptions', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
+    { title: 'Prepare for tech interview', monetary_value: null, urgency: 7, strategic_value: 9, revenue_potential: null },
+    { title: 'Complete online tutorial', monetary_value: null, urgency: 4, strategic_value: 5, revenue_potential: null },
+    { title: 'Record demo video', monetary_value: null, urgency: 4, strategic_value: 4, revenue_potential: null },
+    { title: 'Plan content calendar for next month', monetary_value: null, urgency: 4, strategic_value: 5, revenue_potential: null },
+    { title: 'Finalize video quality checklist', monetary_value: null, urgency: 6, strategic_value: 7, revenue_potential: null },
+    { title: 'Prepare conference talk proposal', monetary_value: null, urgency: 5, strategic_value: 6, revenue_potential: null },
 
-    // CC / Balance
-    { title: 'Propose to Discover (balance)', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
-    { title: 'New base hotel - waiting for CC info', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
+    // Payments / Balance
+    { title: 'Negotiate lower credit card rate', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
+    { title: 'Update payment method for hotel booking', monetary_value: null, urgency: 4, strategic_value: 3, revenue_potential: null },
 
     // Misc
-    { title: 'New skate straps', monetary_value: null, urgency: 2, strategic_value: 1, revenue_potential: null },
+    { title: 'Order replacement sports gear', monetary_value: null, urgency: 2, strategic_value: 1, revenue_potential: null },
   ];
 
   console.log(`Inserting ${allTasks.length} tasks...`);
