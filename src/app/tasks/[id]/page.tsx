@@ -7,7 +7,7 @@ import { eq, and } from 'drizzle-orm';
 import TaskDetailClient from './TaskDetailClient';
 import type { Task } from '@/types/task';
 
-export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function TaskDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ edit?: string }> }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) redirect('/auth/signin');
 
@@ -33,5 +33,6 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     updatedAt: task.updatedAt.toISOString(),
   };
 
-  return <TaskDetailClient task={serialized} />;
+  const { edit } = await searchParams;
+  return <TaskDetailClient task={serialized} autoEdit={edit === 'true'} />;
 }

@@ -340,9 +340,9 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
             {/* Task content */}
             <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium leading-snug ${task.status === 'done' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+              <Link href={`/tasks/${task.id}?edit=true`} className={`text-sm font-medium leading-snug hover:underline ${task.status === 'done' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
                 {task.title}
-              </p>
+              </Link>
 
               {/* Badges row */}
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
