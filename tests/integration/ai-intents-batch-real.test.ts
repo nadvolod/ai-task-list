@@ -174,10 +174,9 @@ describe('Real OpenAI intent classification — batch_update', () => {
       u.task_query.toLowerCase().includes('investor') || u.task_query.toLowerCase().includes('quarterly')
     );
     expect(investor).toBeDefined();
-    // The AI may extract Michael as assignee or mention him in description
-    const hasAssignee = investor.updates.assignee && /michael/i.test(investor.updates.assignee);
-    const hasMichaelInDesc = investor.updates.description && /michael/i.test(investor.updates.description);
-    expect(hasAssignee || hasMichaelInDesc).toBe(true);
+    // Explicit ownership assignment should map to updates.assignee
+    expect(typeof investor.updates.assignee).toBe('string');
+    expect(investor.updates.assignee).toMatch(/michael/i);
 
     // DevOps onboarding: priority boost
     const devops = intent.updates.find((u: { task_query: string }) =>
