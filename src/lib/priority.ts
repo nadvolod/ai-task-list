@@ -32,8 +32,10 @@ RANKING PRINCIPLES:
 
 SCORING RULES:
 - Scores must be RELATIVE — spread them across the 0-100 range based on the current list
-- The most important task should score 90-100
+- The most important task should score 90-100, but ONLY if it has significant monetary value, urgency, or strategic importance
 - The least important should score 10-30
+- A task with NO monetary value, NO urgency, and NO strategic value should score 20-40 regardless of how few tasks exist
+- If there is only ONE task, do NOT automatically give it 90-100. Score it based on its actual attributes.
 - Differentiate clearly: avoid giving similar scores to very different tasks
 - If two tasks differ by more than 5x in monetary value, the higher-value task MUST score higher. No exceptions.
 - Today's date is {today}
