@@ -1,7 +1,29 @@
 {
   "name": "ai-task-list",
   "version": "0.1.0",
-  "private": true,
+  "description": "AI-powered task capture and prioritization with image upload, voice commands, and intelligent scoring",
+  "license": "MIT",
+  "author": "Nikolay Advolodkin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nadvolod/ai-task-list.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nadvolod/ai-task-list/issues"
+  },
+  "homepage": "https://github.com/nadvolod/ai-task-list#readme",
+  "keywords": [
+    "nextjs",
+    "ai",
+    "task-management",
+    "openai",
+    "gemini",
+    "voice-commands",
+    "neon-postgres"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
