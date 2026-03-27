@@ -51,7 +51,7 @@ npm run test:coverage
 
 - **Tests must fail when API keys are missing.** Never use `describe.skipIf` or silent skips. Use `throw new Error('KEY_NAME is required')` in `beforeAll` instead.
 - **Integration tests call real APIs.** Some tests validate prompt quality against real OpenAI/Gemini responses. These require valid API keys.
-- **All API keys must be configured in CI.** If a test needs an API key, it must be in `.github/workflows/ci.yml` under the job's `env` section.
+- **All API keys must be configured in CI via GitHub Secrets.** If a test needs an API key, reference `${{ secrets.KEY_NAME }}` in `.github/workflows/ci.yml` under the job's `env` section. Never commit literal secret values.
 
 ## Pull Request Process
 

@@ -6,4 +6,4 @@ Please read the full text at the link above. In summary, we are committed to pro
 
 ## Reporting
 
-Instances of unacceptable behavior may be reported by opening an issue or contacting the maintainers. All complaints will be reviewed and investigated promptly and fairly.
+Instances of unacceptable behavior may be reported privately via [GitHub Security Advisories](https://github.com/nadvolod/ai-task-list/security/advisories/new). Please do not include sensitive incident details in public GitHub issues. All complaints will be reviewed and investigated promptly and fairly.

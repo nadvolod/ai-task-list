@@ -11,7 +11,7 @@ Brief description of the changes.
 
 ## Related issue
 
-Closes #
+Closes #(issue number)
 
 ## Checklist
 
