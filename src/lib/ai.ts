@@ -198,7 +198,7 @@ export interface TaskUpdateFields {
   category?: string;
 }
 
-export type VoiceIntent =
+export type VoiceIntentBase =
   | { intent: 'create_tasks'; tasks: VoiceCapturedTask[] }
   | { intent: 'complete_task'; task_query: string }
   | { intent: 'start_task'; task_query: string }
@@ -211,6 +211,11 @@ export type VoiceIntent =
   | { intent: 'query_count'; filter?: 'all' | 'overdue' | 'today' | 'high_priority' | 'done' }
   | { intent: 'undo_complete'; task_query: string }
   | { intent: 'unknown'; raw_text: string };
+
+export type VoiceIntent = VoiceIntentBase & {
+  needs_confirmation?: boolean;
+  ambiguities?: string[];
+};
 
 function buildClassificationPrompt(existingTaskTitles: string[], currentDate?: string): string {
   const taskListContext = existingTaskTitles.length > 0
@@ -289,7 +294,18 @@ MATCHING RULES:
 - Negation: Pay careful attention to negation. "Don't assign it to me" means the speaker is NOT the assignee — assign to the other person mentioned. "Not high priority" means low priority (urgency 2-3). "Don't create a task" → return unknown with raw_text.
 - Subtask disambiguation: When the user says "with subtasks", uses a colon followed by a list, or says "which involves" → create ONE parent task with a subtasks array. When items are clearly independent ("and also", separate sentences about unrelated work) → create separate top-level tasks in create_tasks.
 - Priority inference: Infer urgency from context phrases. "blocking launch"/"critical"/"showstopper" → urgency 9-10. "ASAP"/"urgent" → urgency 8-9. "important"/"high priority" → urgency 7-8. "nice to have"/"not a rush"/"low priority" → urgency 2-3.
-- Relative dates: "end of month" → last calendar day of current month. "end of week" → Friday of current week. "in N days" → today + N calendar days. "next [weekday]" → the upcoming occurrence of that weekday AFTER today.`;
+- Relative dates: "end of month" → last calendar day of current month. "end of week" → Friday of current week. "in N days" → today + N calendar days. "next [weekday]" → the upcoming occurrence of that weekday AFTER today.
+
+CLARIFICATION RULES:
+- Add "needs_confirmation": true and "ambiguities": ["description of ambiguity"] to your JSON response when:
+  - The referenced task is ambiguous (multiple tasks could match)
+  - The owner/assignee is unclear (multiple people mentioned without clear assignment)
+  - The due date has multiple valid interpretations
+  - The user contradicts themselves and the final intent is unclear
+  - Critical information is missing and the utterance is too vague to act on
+- Set "needs_confirmation": false (or omit) when the intent and fields are clear
+- Keep ambiguity descriptions short and specific, e.g. "unclear which task: 'budget' matches 2 tasks"
+- Do NOT flag ambiguity for optional missing fields (priority, category). Only flag for critical fields: intent, task reference, owner, due date.`;
 }
 
 function parseIntentResponse(content: string, fallbackText: string): VoiceIntent {

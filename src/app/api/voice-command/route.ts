@@ -116,6 +116,8 @@ export async function POST(req: NextRequest) {
       intent: intent.intent,
       ...result,
       speechUrl,
+      needs_confirmation: intent.needs_confirmation ?? false,
+      ambiguities: intent.ambiguities ?? [],
     });
   } catch (err) {
     logger.error('POST /api/voice-command failed', { error: (err as Error).message });
