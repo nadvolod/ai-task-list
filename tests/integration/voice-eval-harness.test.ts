@@ -349,7 +349,7 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
   }
 
   // Simple intents: complete_task, start_task, delete_task, unknown
-  if (['complete_task', 'start_task', 'delete_task', 'unknown'].includes(gold.expected_intent)) {
+  if (['complete_task', 'start_task', 'delete_task', 'unknown', 'undo_complete', 'query_briefing', 'query_count', 'query_tasks'].includes(gold.expected_intent)) {
     const result: EvalResult = {
       id: gold.id,
       bucket: gold.scenario_bucket,
@@ -438,7 +438,7 @@ describe('Voice-to-task evaluation harness', () => {
   });
 
   it('gold dataset loads correctly', () => {
-    expect(goldCases.length).toBeGreaterThanOrEqual(32);
+    expect(goldCases.length).toBeGreaterThanOrEqual(39);
     for (const c of goldCases) {
       expect(c.id).toBeTruthy();
       expect(c.scenario_bucket).toBeTruthy();
