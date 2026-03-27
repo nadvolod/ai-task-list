@@ -62,6 +62,8 @@ export async function POST(req: NextRequest) {
           recurrenceDays: parsed.recurrence_days ?? null,
           assignee: normalizeAssignee(parsed.assignee) ?? defaultAssigneeFromEmail(auth.email),
           category: parsed.category ?? null,
+          project: parsed.project ?? null,
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
         })
         .returning();
 

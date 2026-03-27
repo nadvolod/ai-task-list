@@ -40,8 +40,9 @@ export const tasks = pgTable('tasks', {
   recurrenceEndDate: timestamp('recurrence_end_date'),
   recurrenceParentId: integer('recurrence_parent_id'), // links instances in a recurrence chain
   recurrenceActive: text('recurrence_active').default('true'),
-  // Category (Issue #13)
+  // Category & project (Issue #13, #22)
   category: text('category'), // user-defined category e.g. "Temporal", "Personal"
+  project: text('project'), // specific initiative e.g. "Q3 Launch", "WHO RFP"
   // Assignee & priority override (Issue #11)
   assignee: text('assignee'),
   manualPriorityScore: real('manual_priority_score'),

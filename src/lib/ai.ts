@@ -390,6 +390,8 @@ export interface VoiceCapturedTask {
   recurrence_days?: string;
   assignee?: string;
   category?: string;
+  project?: string;
+  confidence?: number;
 }
 
 /**
@@ -428,7 +430,10 @@ export async function transcribeAndCreateTasks(
   "subtasks": [{"title": "sub-item title", "description": "context"}] or null,
   "recurrence_rule": "daily"|"weekly"|"biweekly"|"monthly" or null,
   "recurrence_days": "1,3,5" or null,
-  "assignee": "person name" or null
+  "assignee": "person name" or null,
+  "category": "department or area" or null,
+  "project": "specific initiative name" or null,
+  "confidence": 0.0-1.0
 }]
 
 Today's date is ${new Date().toISOString().split('T')[0]}.
@@ -441,6 +446,8 @@ Rules:
 - Detect recurring patterns: "every Monday", "weekly standup", "daily check-in" → set recurrence_rule and recurrence_days (1=Mon..7=Sun)
 - "assign this to Sarah" or "Sarah needs to handle this" → set assignee
 - Detect project/category context: "for Temporal", "this is a marketing task", "personal errand" → set category
+- Detect project names: "for the WHO RFP", "part of Q3 launch", "under the migration project" → set project (distinct from category)
+- Set confidence (0-1): 1.0 for clear/unambiguous speech, 0.7-0.9 for mostly clear with minor inference, 0.3-0.6 for significant interpretation, below 0.3 for highly ambiguous
 - Interpret "urgent"/"ASAP" as urgency 8-9
 - Interpret relative dates: "tomorrow", "Friday", "next week", "end of month"
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
