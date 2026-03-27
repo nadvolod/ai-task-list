@@ -15,9 +15,9 @@ const RECURRENCE_OPTIONS = [
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export default function TaskDetailClient({ task: initialTask }: { task: Task }) {
+export default function TaskDetailClient({ task: initialTask, autoEdit = false }: { task: Task; autoEdit?: boolean }) {
   const [task, setTask] = useState(initialTask);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(autoEdit);
   const [title, setTitle] = useState(initialTask.title);
   const [description, setDescription] = useState(initialTask.description ?? '');
   const [monetaryValue, setMonetaryValue] = useState(initialTask.monetaryValue?.toString() ?? '');
