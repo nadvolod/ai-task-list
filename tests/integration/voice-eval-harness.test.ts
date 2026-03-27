@@ -22,6 +22,9 @@ interface GoldExpectedTask {
   assignee_contains?: string;
   expected_subtasks?: string[];
   urgency_min?: number;
+  urgency_max?: number;
+  monetary_value_min?: number;
+  category_contains?: string;
 }
 
 interface GoldExpectedOutput {
@@ -169,18 +172,42 @@ function subtaskScore(expectedTasks: GoldExpectedTask[] | undefined, actualTasks
 
 function priorityScore(expectedTasks: GoldExpectedTask[] | undefined, actualTasks: unknown[]): number {
   if (!expectedTasks) return 1;
-  const tasksWithPriority = expectedTasks.filter(t => t.urgency_min !== undefined);
+  const tasksWithPriority = expectedTasks.filter(t =>
+    t.urgency_min !== undefined || t.urgency_max !== undefined || t.monetary_value_min !== undefined
+  );
   if (tasksWithPriority.length === 0) return 1;
   let matched = 0;
   for (const exp of tasksWithPriority) {
     const found = actualTasks.some((t: unknown) => {
       const task = t as Record<string, unknown>;
       const urgency = Number(task.urgency ?? 0);
-      return urgency >= exp.urgency_min!;
+      const monetaryValue = Number(task.monetary_value ?? 0);
+      let passes = true;
+      if (exp.urgency_min !== undefined) passes = passes && urgency >= exp.urgency_min;
+      if (exp.urgency_max !== undefined) passes = passes && urgency <= exp.urgency_max;
+      if (exp.monetary_value_min !== undefined) passes = passes && monetaryValue >= exp.monetary_value_min;
+      return passes;
     });
     if (found) matched++;
   }
   return matched / tasksWithPriority.length;
+}
+
+function categoryScore(expectedTasks: GoldExpectedTask[] | undefined, actualTasks: unknown[]): number {
+  if (!expectedTasks) return 1;
+  const tasksWithCategory = expectedTasks.filter(t => t.category_contains);
+  if (tasksWithCategory.length === 0) return 1;
+  let matched = 0;
+  for (const exp of tasksWithCategory) {
+    const needle = exp.category_contains!.toLowerCase();
+    const found = actualTasks.some((t: unknown) => {
+      const task = t as Record<string, unknown>;
+      const category = String(task.category ?? '').toLowerCase();
+      return category.includes(needle);
+    });
+    if (found) matched++;
+  }
+  return matched / tasksWithCategory.length;
 }
 
 // --- Evaluate update intents ---
@@ -310,7 +337,33 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
     return evaluateBatchIntent(gold, actual);
   }
 
-  // create_tasks and other intents
+  // Simple intents: complete_task, start_task, delete_task, unknown
+  if (['complete_task', 'start_task', 'delete_task', 'unknown'].includes(gold.expected_intent)) {
+    const result: EvalResult = {
+      id: gold.id,
+      bucket: gold.scenario_bucket,
+      intent_match: intentMatch(gold.expected_intent, String(actual.intent)),
+      task_count_match: true,
+      title_score: 1,
+      due_date_score: 1,
+      owner_score: 1,
+      subtask_score: 1,
+      priority_score: 1,
+      overall_score: 0,
+    };
+
+    // Check task_query for intents that reference a task
+    if (gold.expected_output.task_query_contains) {
+      const needle = gold.expected_output.task_query_contains.toLowerCase();
+      const taskQuery = String(actual.task_query ?? '').toLowerCase();
+      result.title_score = taskQuery.includes(needle) ? 1 : 0;
+    }
+
+    result.overall_score = computeOverall(result);
+    return result;
+  }
+
+  // create_tasks
   const result: EvalResult = {
     id: gold.id,
     bucket: gold.scenario_bucket,
@@ -332,7 +385,19 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
   result.due_date_score = dueDateScore(exp.tasks, actualTasks);
   result.owner_score = ownerScore(exp.tasks, actualTasks);
   result.subtask_score = subtaskScore(exp.tasks, actualTasks);
-  result.priority_score = priorityScore(exp.tasks, actualTasks);
+
+  // Combine priority and category into priority_score
+  const pScore = priorityScore(exp.tasks, actualTasks);
+  const cScore = categoryScore(exp.tasks, actualTasks);
+  const hasPriority = exp.tasks?.some(t => t.urgency_min !== undefined || t.urgency_max !== undefined || t.monetary_value_min !== undefined);
+  const hasCategory = exp.tasks?.some(t => t.category_contains);
+  if (hasPriority && hasCategory) {
+    result.priority_score = (pScore + cScore) / 2;
+  } else if (hasCategory) {
+    result.priority_score = cScore;
+  } else {
+    result.priority_score = pScore;
+  }
 
   result.overall_score = computeOverall(result);
   return result;
@@ -361,7 +426,7 @@ describe('Voice-to-task evaluation harness', () => {
   });
 
   it('gold dataset loads correctly', () => {
-    expect(goldCases.length).toBeGreaterThanOrEqual(15);
+    expect(goldCases.length).toBeGreaterThanOrEqual(30);
     for (const c of goldCases) {
       expect(c.id).toBeTruthy();
       expect(c.scenario_bucket).toBeTruthy();
@@ -430,9 +495,9 @@ describe('Voice-to-task evaluation harness', () => {
     const intentRate = results.filter(r => r.intent_match).length / results.length;
     console.log(`\n  OVERALL: avg=${overallAvg.toFixed(2)}, intent_rate=${(intentRate * 100).toFixed(0)}%, n=${results.length}`);
 
-    // Assertions — permissive initial thresholds
-    expect(overallAvg).toBeGreaterThanOrEqual(0.5);
-    expect(intentRate).toBeGreaterThanOrEqual(0.7);
+    // Assertions — tightened from baseline (PR 1 scored 0.96 avg, 100% intent)
+    expect(overallAvg).toBeGreaterThanOrEqual(0.7);
+    expect(intentRate).toBeGreaterThanOrEqual(0.8);
 
     // Each case should score above minimum
     for (const r of results) {
