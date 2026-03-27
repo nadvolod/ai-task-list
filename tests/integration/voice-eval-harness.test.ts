@@ -66,17 +66,19 @@ interface EvalResult {
   owner_score: number;
   subtask_score: number;
   priority_score: number;
+  clarification_score: number;
   overall_score: number;
 }
 
 // --- Scoring weights (from issue #22) ---
 const WEIGHTS = {
-  intent: 0.25,
+  intent: 0.20,
   title: 0.15,
   due_date: 0.15,
-  owner: 0.15,
+  owner: 0.10,
   subtasks: 0.10,
-  task_count: 0.10,
+  task_count: 0.05,
+  clarification: 0.15,
   priority: 0.10,
 };
 
@@ -223,6 +225,7 @@ function evaluateUpdateIntent(gold: GoldTestCase, actual: Record<string, unknown
     owner_score: 1,
     subtask_score: 1,
     priority_score: 1,
+    clarification_score: 1,
     overall_score: 0,
   };
 
@@ -272,6 +275,7 @@ function evaluateBatchIntent(gold: GoldTestCase, actual: Record<string, unknown>
     owner_score: 1,
     subtask_score: 1,
     priority_score: 1,
+    clarification_score: 1,
     overall_score: 0,
   };
 
@@ -315,6 +319,12 @@ function evaluateBatchIntent(gold: GoldTestCase, actual: Record<string, unknown>
 
 // --- Compute weighted overall ---
 
+function clarificationScore(gold: GoldTestCase, actual: Record<string, unknown>): number {
+  if (gold.should_clarify === undefined) return 1;
+  const actualNeedsConfirmation = actual.needs_confirmation === true;
+  return gold.should_clarify === actualNeedsConfirmation ? 1 : 0;
+}
+
 function computeOverall(r: EvalResult): number {
   return (
     (r.intent_match ? 1 : 0) * WEIGHTS.intent +
@@ -323,6 +333,7 @@ function computeOverall(r: EvalResult): number {
     r.owner_score * WEIGHTS.owner +
     r.subtask_score * WEIGHTS.subtasks +
     (r.task_count_match ? 1 : 0) * WEIGHTS.task_count +
+    r.clarification_score * WEIGHTS.clarification +
     r.priority_score * WEIGHTS.priority
   );
 }
@@ -374,6 +385,7 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
     owner_score: 1,
     subtask_score: 1,
     priority_score: 1,
+    clarification_score: 1,
     overall_score: 0,
   };
 
@@ -426,7 +438,7 @@ describe('Voice-to-task evaluation harness', () => {
   });
 
   it('gold dataset loads correctly', () => {
-    expect(goldCases.length).toBeGreaterThanOrEqual(30);
+    expect(goldCases.length).toBeGreaterThanOrEqual(32);
     for (const c of goldCases) {
       expect(c.id).toBeTruthy();
       expect(c.scenario_bucket).toBeTruthy();
@@ -446,6 +458,8 @@ describe('Voice-to-task evaluation harness', () => {
       ) as unknown as Record<string, unknown>;
 
       const result = evaluateCase(gold, actual);
+      result.clarification_score = clarificationScore(gold, actual);
+      result.overall_score = computeOverall(result);
       results.push(result);
     }
 
@@ -461,9 +475,10 @@ describe('Voice-to-task evaluation harness', () => {
       'Owner'.padEnd(7),
       'Subs'.padEnd(7),
       'Pri'.padEnd(7),
+      'Clar'.padEnd(7),
       'Overall'
     );
-    console.log('-'.repeat(110));
+    console.log('-'.repeat(120));
 
     for (const r of results) {
       console.log(
@@ -476,6 +491,7 @@ describe('Voice-to-task evaluation harness', () => {
         r.owner_score.toFixed(2).padEnd(7),
         r.subtask_score.toFixed(2).padEnd(7),
         r.priority_score.toFixed(2).padEnd(7),
+        r.clarification_score.toFixed(2).padEnd(7),
         r.overall_score.toFixed(2)
       );
     }
