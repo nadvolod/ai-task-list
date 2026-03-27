@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
         recurrenceDays: body.recurrenceDays ?? null,
         recurrenceEndDate,
         category: typeof body.category === 'string' && body.category.trim() ? body.category.trim() : null,
+        project: typeof body.project === 'string' && body.project.trim() ? body.project.trim() : null,
         assignee: normalizeAssignee(body.assignee) ?? defaultAssigneeFromEmail(auth.email),
       })
       .returning();

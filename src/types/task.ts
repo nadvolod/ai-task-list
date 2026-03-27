@@ -21,8 +21,9 @@ export interface Task {
   recurrenceEndDate: string | null;
   recurrenceParentId: number | null;
   recurrenceActive: string | null;
-  // Category (Issue #13)
+  // Category & project (Issue #13, #22)
   category: string | null;
+  project: string | null;
   // Assignee & priority override (Issue #11)
   assignee: string | null;
   manualPriorityScore: number | null;

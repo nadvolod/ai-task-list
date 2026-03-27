@@ -121,6 +121,9 @@ async function migrate() {
   `;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_category_boosts_user_category ON category_boosts(user_id, category)`;
 
+  // Migration: project field (Issue #22)
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project TEXT`;
+
   console.log('Migration complete!');
 }
 
