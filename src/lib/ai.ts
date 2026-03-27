@@ -212,14 +212,14 @@ export type VoiceIntent =
   | { intent: 'undo_complete'; task_query: string }
   | { intent: 'unknown'; raw_text: string };
 
-function buildClassificationPrompt(existingTaskTitles: string[]): string {
+function buildClassificationPrompt(existingTaskTitles: string[], currentDate?: string): string {
   const taskListContext = existingTaskTitles.length > 0
     ? `\nThe user's current tasks are:\n${existingTaskTitles.map((t, i) => `${i + 1}. "${t}"`).join('\n')}`
     : '\nThe user has no tasks yet.';
 
   return `You are a voice command router for a CEO's task management app. Classify the user's spoken input into one of these intents and return ONLY valid JSON.
 
-Today's date is ${new Date().toISOString().split('T')[0]}.
+Today's date is ${currentDate ?? new Date().toISOString().split('T')[0]}.
 ${taskListContext}
 
 INTENTS:
@@ -284,7 +284,12 @@ MATCHING RULES:
 - "pause X" or "stop working on X" → update_task with updates.status: "todo"
 - Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
-- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)`;
+- If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)
+- Self-corrections: If the user corrects themselves ("no wait", "actually", "I mean"), use ONLY the corrected version. Ignore the false start entirely.
+- Negation: Pay careful attention to negation. "Don't assign it to me" means the speaker is NOT the assignee — assign to the other person mentioned. "Not high priority" means low priority (urgency 2-3). "Don't create a task" → return unknown with raw_text.
+- Subtask disambiguation: When the user says "with subtasks", uses a colon followed by a list, or says "which involves" → create ONE parent task with a subtasks array. When items are clearly independent ("and also", separate sentences about unrelated work) → create separate top-level tasks in create_tasks.
+- Priority inference: Infer urgency from context phrases. "blocking launch"/"critical"/"showstopper" → urgency 9-10. "ASAP"/"urgent" → urgency 8-9. "important"/"high priority" → urgency 7-8. "nice to have"/"not a rush"/"low priority" → urgency 2-3.
+- Relative dates: "end of month" → last calendar day of current month. "end of week" → Friday of current week. "in N days" → today + N calendar days. "next [weekday]" → the upcoming occurrence of that weekday AFTER today.`;
 }
 
 function parseIntentResponse(content: string, fallbackText: string): VoiceIntent {
@@ -305,7 +310,8 @@ function parseIntentResponse(content: string, fallbackText: string): VoiceIntent
  */
 export async function classifyTextIntent(
   text: string,
-  existingTaskTitles: string[]
+  existingTaskTitles: string[],
+  currentDate?: string
 ): Promise<VoiceIntent> {
   const client = getClient();
   const response = await client.chat.completions.create({
@@ -313,7 +319,7 @@ export async function classifyTextIntent(
     max_tokens: 2000,
     temperature: 0.1,
     messages: [
-      { role: 'system', content: buildClassificationPrompt(existingTaskTitles) },
+      { role: 'system', content: buildClassificationPrompt(existingTaskTitles, currentDate) },
       { role: 'user', content: text },
     ],
   });
