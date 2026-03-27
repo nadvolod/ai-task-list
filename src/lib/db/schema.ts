@@ -26,6 +26,7 @@ export const tasks = pgTable('tasks', {
   priorityReason: text('priority_reason'),
   monetaryValue: real('monetary_value'),
   revenuePotential: real('revenue_potential'),
+  revenueType: text('revenue_type'), // 'onetime' | 'mrr' | 'arr' | null
   urgency: integer('urgency'), // 1-10
   strategicValue: integer('strategic_value'), // 1-10
   manualOrder: integer('manual_order'),

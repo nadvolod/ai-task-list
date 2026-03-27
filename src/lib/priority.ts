@@ -9,6 +9,7 @@ export interface PriorityInput {
   description?: string | null;
   monetaryValue?: number | null;
   revenuePotential?: number | null;
+  revenueType?: string | null;    // 'onetime' | 'mrr' | 'arr'
   urgency?: number | null;       // 1-10
   strategicValue?: number | null; // 1-10
   userManualBoost?: number;       // 0-10
@@ -24,6 +25,7 @@ const REPRIORITIZE_PROMPT = `You are a CEO's task prioritization engine. You wil
 
 RANKING PRINCIPLES:
 1. MONETARY VALUE is the primary factor. The task with the highest dollar amount (monetary_value or revenue_potential) should get the highest score. Spread scores proportionally — if one task is worth 75x more than another, that must be clearly reflected.
+   REVENUE TYPE matters: revenue_potential is already adjusted for type. MRR (monthly recurring) is annualized (×12), ARR (annual recurring) is valued at 3× one-time. These multiplied values appear in revenue_potential, so use them directly.
 2. URGENCY & DUE DATES are the tiebreaker. Among tasks with similar monetary value, overdue or imminent tasks rank higher.
 3. EFFORT is the final tiebreaker. Among tasks with similar value and urgency, quicker/easier tasks rank slightly higher (faster ROI).
 4. MANUAL OVERRIDES must be respected. If a task has a "manual_priority" field, use that exact score — do NOT change it. The user explicitly set it.
@@ -187,12 +189,19 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     overrideContext = `USER OVERRIDE HISTORY (respect these preferences):\n${overrideLines.join('\n')}`;
   }
 
-  const taskList = topLevel.map(t => ({
+  const taskList = topLevel.map(t => {
+    // Apply MRR/ARR multipliers for effective comparison value
+    let effectiveRevenue = t.revenuePotential ?? 0;
+    const revenueType = (t as Record<string, unknown>).revenueType as string | null;
+    if (revenueType === 'mrr') effectiveRevenue *= 12; // Monthly → annualized
+    else if (revenueType === 'arr') effectiveRevenue *= 3; // ARR worth 3x one-time
+    return {
     id: t.id,
     title: t.title,
     description: t.description,
     monetary_value: t.monetaryValue,
-    revenue_potential: t.revenuePotential,
+    revenue_potential: effectiveRevenue > 0 ? effectiveRevenue : t.revenuePotential,
+    revenue_type: revenueType ?? 'onetime',
     urgency: t.urgency,
     strategic_value: t.strategicValue,
     due_date: t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : null,
@@ -202,7 +211,8 @@ export async function reprioritizeAllTasks(userId: number): Promise<void> {
     category_boost: t.category ? (boostMap[t.category] ?? 0) : undefined,
     subtask_progress: subtaskProgress[t.id] ?? undefined,
     manual_priority: t.manualPriorityScore ?? undefined,
-  }));
+  };
+  });
 
   try {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -308,8 +318,11 @@ export function calculatePriorityFallback(input: PriorityInput): PriorityResult 
   let score = 0;
 
   // Monetary value dominates — log scale so $75K >> $1K (max ~60 points)
+  // Apply MRR/ARR multipliers: MRR×12 (annualized), ARR×3 (3x one-time value)
   const mv = Math.max(input.monetaryValue ?? 0, 0);
-  const rp = Math.max(input.revenuePotential ?? 0, 0);
+  let rp = Math.max(input.revenuePotential ?? 0, 0);
+  if (input.revenueType === 'mrr') rp *= 12;
+  else if (input.revenueType === 'arr') rp *= 3;
   const maxDollar = Math.max(mv, rp);
   if (maxDollar > 0) {
     score += Math.min(Math.log10(maxDollar) * 12, 60);
