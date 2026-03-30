@@ -63,6 +63,11 @@ export default function TaskCard({
     },
   );
 
+  // Prevent touch events on buttons/links from triggering the card's swipe handler
+  function stopSwipe(e: React.TouchEvent) {
+    e.stopPropagation();
+  }
+
   const hasChildren = subtasks.length > 0;
   const childDone = subtasks.filter(c => c.status === 'done').length;
 
@@ -169,6 +174,7 @@ export default function TaskCard({
               <button
                 type="button"
                 onClick={onToggleExpand}
+                onTouchStart={stopSwipe}
                 aria-expanded={isExpanded}
                 aria-label={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
                 className="mt-0.5 min-w-[44px] min-h-[44px] -m-3 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
@@ -181,6 +187,7 @@ export default function TaskCard({
             <button
               type="button"
               onClick={() => onCycleStatus(task)}
+              onTouchStart={stopSwipe}
               aria-label={`Mark "${task.title}" as ${statusLabel(nextStatus(task.status))}`}
               className="mt-0.5 min-w-[44px] min-h-[44px] -m-3 flex-shrink-0 flex items-center justify-center transition-colors hover:opacity-80"
             >
@@ -225,6 +232,7 @@ export default function TaskCard({
           <div className="flex items-center gap-1 flex-shrink-0">
             <Link
               href={`/tasks/${task.id}`}
+              onTouchStart={stopSwipe}
               className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
               aria-label={`Edit task: ${task.title}`}
             >
@@ -234,6 +242,7 @@ export default function TaskCard({
             </Link>
             <button
               onClick={() => onDelete(task.id)}
+              onTouchStart={stopSwipe}
               disabled={isDeleting}
               className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
               aria-label={`Delete task: ${task.title}`}
