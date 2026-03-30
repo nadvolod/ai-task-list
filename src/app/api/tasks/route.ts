@@ -15,6 +15,21 @@ export async function GET(req: NextRequest) {
     const userId = auth.userId;
     logger.info('GET /api/tasks', { userId });
 
+    // Support filtering by parentId for subtask-only fetches
+    const parentIdParam = req.nextUrl.searchParams.get('parentId');
+    if (parentIdParam) {
+      const parentId = parseInt(parentIdParam);
+      if (isNaN(parentId)) {
+        return NextResponse.json({ error: 'parentId must be a number' }, { status: 400 });
+      }
+      const subtasks = await db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.userId, userId), eq(tasks.parentId, parentId)))
+        .orderBy(tasks.subtaskOrder);
+      return NextResponse.json(subtasks);
+    }
+
     const userTasks = await db
       .select()
       .from(tasks)

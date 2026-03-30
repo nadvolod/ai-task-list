@@ -27,6 +27,7 @@ export default function SearchFilterBar({
     <div className="space-y-2">
       {/* Search input */}
       <div className="relative">
+        <label htmlFor="search-tasks" className="sr-only">Search tasks</label>
         <svg
           className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -34,6 +35,7 @@ export default function SearchFilterBar({
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input
+          id="search-tasks"
           type="text"
           value={searchQuery}
           onChange={e => onSearchChange(e.target.value)}
@@ -44,6 +46,7 @@ export default function SearchFilterBar({
           <button
             onClick={() => onSearchChange('')}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+            aria-label="Clear search"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -53,7 +56,7 @@ export default function SearchFilterBar({
       </div>
 
       {/* Filter chips */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide" role="tablist" aria-label="Filter tasks">
         {filters.map(f => {
           const count = f.countKey ? counts[f.countKey] : 0;
           const isActive = activeFilter === f.key;
@@ -61,6 +64,8 @@ export default function SearchFilterBar({
             <button
               key={f.key}
               onClick={() => onFilterChange(f.key)}
+              role="tab"
+              aria-selected={isActive}
               className={`flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
                 isActive
                   ? 'bg-blue-600 text-white'

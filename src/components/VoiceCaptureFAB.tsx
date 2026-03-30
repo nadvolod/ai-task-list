@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useToast } from '@/components/ui/ToastProvider';
 import type { Task } from '@/types/task';
 
 interface VoiceCommandResponse {
@@ -30,13 +31,12 @@ interface VoiceCaptureFABProps {
 export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskDeleted, onAllTasksDeleted, onRefreshRequested }: VoiceCaptureFABProps) {
   const [state, setState] = useState<'idle' | 'recording' | 'processing' | 'speaking'>('idle');
   const [elapsed, setElapsed] = useState(0);
-  const [toast, setToast] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [lastResponse, setLastResponse] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (state === 'recording') {
@@ -49,20 +49,6 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
   }, [state]);
 
   useEffect(() => {
-    if (toast) {
-      const t = setTimeout(() => setToast(null), 4000);
-      return () => clearTimeout(t);
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    if (error) {
-      const t = setTimeout(() => setError(null), 5000);
-      return () => clearTimeout(t);
-    }
-  }, [error]);
-
-  useEffect(() => {
     if (lastResponse) {
       const t = setTimeout(() => setLastResponse(null), 8000);
       return () => clearTimeout(t);
@@ -71,7 +57,6 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
 
   async function startRecording() {
     try {
-      setError(null);
       setLastResponse(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -91,7 +76,7 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
       mediaRecorder.start();
       setState('recording');
     } catch {
-      setError('Microphone access denied');
+      showToast('Microphone access denied', { type: 'error' });
     }
   }
 
@@ -112,7 +97,19 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
       });
 
       if (!res.ok) {
-        setError('Failed to process voice command');
+        showToast('Failed to process voice command', {
+          type: 'error',
+          action: {
+            label: 'Retry',
+            onClick: () => {
+              if (chunksRef.current.length > 0) {
+                setState('processing');
+                const retryBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+                sendVoiceCommand(retryBlob);
+              }
+            },
+          },
+        });
         setState('idle');
         return;
       }
@@ -120,16 +117,14 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
       const data: VoiceCommandResponse = await res.json();
       handleCommandResponse(data);
     } catch {
-      setError('Failed to process voice command');
+      showToast('Failed to process voice command', { type: 'error' });
       setState('idle');
     }
   }
 
   function handleCommandResponse(data: VoiceCommandResponse) {
-    // Show the spoken response as text
     setLastResponse(data.spokenResponse);
 
-    // Play audio response if available
     if (data.speechUrl) {
       setState('speaking');
       const audio = new Audio(data.speechUrl);
@@ -141,12 +136,11 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
       setState('idle');
     }
 
-    // Handle mutations
     switch (data.action) {
       case 'created':
         if (data.tasksCreated?.length) {
           onTasksCreated(data.tasksCreated);
-          setToast(`Created ${data.tasksCreated.length} task${data.tasksCreated.length !== 1 ? 's' : ''}`);
+          showToast(`Created ${data.tasksCreated.length} task${data.tasksCreated.length !== 1 ? 's' : ''}`, { type: 'success' });
         }
         break;
       case 'completed':
@@ -154,31 +148,30 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
       case 'updated':
         if (data.taskUpdated) {
           onTaskUpdated(data.taskUpdated);
-          setToast(data.action === 'completed' ? 'Task completed' : data.action === 'updated' ? 'Task updated' : 'Task reopened');
+          showToast(data.action === 'completed' ? 'Task completed' : data.action === 'updated' ? 'Task updated' : 'Task reopened');
         }
         break;
       case 'batch_updated':
         if (data.tasksUpdated?.length) {
           onRefreshRequested();
-          setToast(`Updated ${data.tasksUpdated.length} tasks`);
+          showToast(`Updated ${data.tasksUpdated.length} tasks`);
         }
         break;
       case 'deleted':
         if (data.taskDeleted) {
           onTaskDeleted(data.taskDeleted);
-          setToast('Task deleted');
+          showToast('Task deleted');
         }
         break;
       case 'deleted_all':
         if (data.allTasksDeleted) {
           onAllTasksDeleted();
-          setToast('All tasks deleted');
+          showToast('All tasks deleted');
         }
         break;
       case 'briefing':
       case 'query':
       case 'count':
-        // For queries, the spoken response handles it. Optionally refresh.
         onRefreshRequested();
         break;
     }
@@ -226,20 +219,6 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
         </div>
       )}
 
-      {/* Toast notification */}
-      {toast && !lastResponse && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg animate-fade-in">
-          {toast}
-        </div>
-      )}
-
-      {/* Error notification */}
-      {error && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg">
-          {error}
-        </div>
-      )}
-
       {/* Recording time indicator */}
       {state === 'recording' && (
         <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
@@ -258,7 +237,7 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
           state === 'speaking' ? 'Stop speaking' :
           'Processing...'
         }
-        className={`fixed z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 ${
+        className={`fixed z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-95 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-6 ${
           state === 'recording'
             ? 'bg-red-600 hover:bg-red-700 animate-pulse'
             : state === 'processing'
@@ -267,7 +246,6 @@ export default function VoiceCaptureFAB({ onTasksCreated, onTaskUpdated, onTaskD
             ? 'bg-blue-500 hover:bg-blue-600'
             : 'bg-blue-600 hover:bg-blue-700'
         }`}
-        style={{ bottom: '5.5rem', right: '1.5rem' }}
       >
         {state === 'processing' ? (
           <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
