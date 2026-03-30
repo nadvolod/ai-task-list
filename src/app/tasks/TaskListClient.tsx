@@ -60,7 +60,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
   async function cycleStatus(task: Task) {
     const newStatus = nextStatus(task.status);
-    const prevTasks = tasks;
+    const oldStatus = task.status;
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
 
     if (newStatus === 'done') {
@@ -78,7 +78,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
       body: JSON.stringify({ status: newStatus }),
     });
     if (!res.ok) {
-      setTasks(prevTasks);
+      // Revert only this task's status using functional update (avoids stale closure)
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: oldStatus } : t));
       showToast('Could not update task status', { type: 'error' });
     } else {
       const data = await res.json();
@@ -262,9 +263,10 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
     });
   }
 
-  const inProgress = activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'doing');
-  const pending = activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'todo');
-  const done = activeFilter === 'done' ? filtered : (activeFilter === 'all' ? filtered.filter(t => t.status === 'done') : []);
+  const byPriority = (a: Task, b: Task) => b.priorityScore - a.priorityScore;
+  const inProgress = (activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'doing')).sort(byPriority);
+  const pending = (activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'todo')).sort(byPriority);
+  const done = (activeFilter === 'done' ? filtered : (activeFilter === 'all' ? filtered.filter(t => t.status === 'done') : [])).sort(byPriority);
 
   return (
     <main className="min-h-screen bg-gray-50 pb-24">
@@ -346,7 +348,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <TaskCard
                   key={task.id}
                   task={task}
-                  children={childrenMap[task.id] ?? []}
+                  subtasks={childrenMap[task.id] ?? []}
                   isExpanded={expandedParents.has(task.id)}
                   onToggleExpand={() => toggleExpand(task.id)}
                   onCycleStatus={cycleStatus}
@@ -368,7 +370,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <TaskCard
                   key={task.id}
                   task={task}
-                  children={childrenMap[task.id] ?? []}
+                  subtasks={childrenMap[task.id] ?? []}
                   isExpanded={expandedParents.has(task.id)}
                   onToggleExpand={() => toggleExpand(task.id)}
                   onCycleStatus={cycleStatus}
@@ -390,7 +392,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <TaskCard
                   key={task.id}
                   task={task}
-                  children={childrenMap[task.id] ?? []}
+                  subtasks={childrenMap[task.id] ?? []}
                   isExpanded={expandedParents.has(task.id)}
                   onToggleExpand={() => toggleExpand(task.id)}
                   onCycleStatus={cycleStatus}

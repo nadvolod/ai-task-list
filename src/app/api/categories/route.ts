@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { categoryBoosts } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 
