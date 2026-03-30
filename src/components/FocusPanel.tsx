@@ -48,10 +48,20 @@ export default function FocusPanel({ onToggleDone, refreshKey = 0 }: FocusPanelP
 
   if (loading) {
     return (
-      <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm opacity-80">Loading your briefing...</span>
+      <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white space-y-3">
+        <div className="h-4 w-32 bg-white/20 rounded animate-pulse" />
+        <div className="h-3 w-full bg-white/15 rounded animate-pulse" />
+        <div className="h-3 w-3/4 bg-white/15 rounded animate-pulse" />
+        <div className="space-y-2 mt-2">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white/10 rounded-xl px-3 py-2.5 flex items-start gap-3">
+              <div className="w-5 h-5 rounded-full bg-white/20 animate-pulse flex-shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3 w-3/4 bg-white/15 rounded animate-pulse" />
+                <div className="h-2 w-1/2 bg-white/10 rounded animate-pulse" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -64,6 +74,8 @@ export default function FocusPanel({ onToggleDone, refreshKey = 0 }: FocusPanelP
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="w-full flex items-center justify-between"
+        aria-label={collapsed ? 'Expand focus panel' : 'Collapse focus panel'}
+        aria-expanded={!collapsed}
       >
         <h2 className="text-sm font-semibold opacity-80">{greeting}</h2>
         <svg

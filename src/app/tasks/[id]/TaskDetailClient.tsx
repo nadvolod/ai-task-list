@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { Task } from '@/types/task';
 import { formatRecurrenceLabel } from '@/lib/recurrence';
+import { useAutoSave } from '@/hooks/useAutoSave';
 
 const RECURRENCE_OPTIONS = [
   { value: '', label: 'None' },
@@ -17,7 +18,6 @@ const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function TaskDetailClient({ task: initialTask }: { task: Task }) {
   const [task, setTask] = useState(initialTask);
-  const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(initialTask.title);
   const [description, setDescription] = useState(initialTask.description ?? '');
   const [monetaryValue, setMonetaryValue] = useState(initialTask.monetaryValue?.toString() ?? '');
@@ -31,8 +31,8 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
   const [recurrenceDays, setRecurrenceDays] = useState<Set<number>>(
     initialTask.recurrenceDays ? new Set(initialTask.recurrenceDays.split(',').map(Number)) : new Set()
   );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+
+  const { save, saveImmediate, status } = useAutoSave(task.id);
 
   // Subtasks state
   const [subtasks, setSubtasks] = useState<Task[]>([]);
@@ -43,64 +43,33 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
   const [recording, setRecording] = useState(false);
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceResult, setVoiceResult] = useState<{ transcription: string } | null>(null);
+  const [error, setError] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  // Fetch subtasks on mount (if this is a parent task)
+  // Fetch subtasks on mount
   useEffect(() => {
     if (initialTask.parentId === null) {
-      fetch(`/api/tasks`)
-        .then(res => res.json())
-        .then((allTasks: Task[]) => {
-          setSubtasks(allTasks.filter((t: Task) => t.parentId === initialTask.id));
-        })
+      fetch(`/api/tasks?parentId=${initialTask.id}`)
+        .then(res => res.ok ? res.json() : [])
+        .then((data: Task[]) => setSubtasks(Array.isArray(data) ? data : []))
         .catch(() => {});
     }
   }, [initialTask.id, initialTask.parentId]);
+
+  function handleFieldChange(field: string, value: string | number | null) {
+    save({ [field]: value });
+  }
 
   function toggleRecurrenceDay(day: number) {
     setRecurrenceDays(prev => {
       const next = new Set(prev);
       if (next.has(day)) next.delete(day);
       else next.add(day);
+      const daysStr = next.size > 0 ? [...next].sort().join(',') : null;
+      save({ recurrenceDays: daysStr });
       return next;
     });
-  }
-
-  async function saveTask() {
-    setSaving(true);
-    setError('');
-
-    const body: Record<string, unknown> = {
-      title,
-      description: description || undefined,
-      monetaryValue: monetaryValue ? parseFloat(monetaryValue) : null,
-      revenuePotential: revenuePotential ? parseFloat(revenuePotential) : null,
-      urgency: urgency ? parseInt(urgency) : null,
-      strategicValue: strategicValue ? parseInt(strategicValue) : null,
-      dueDate: dueDate || null,
-      category: category || null,
-      assignee: assignee || null,
-      recurrenceRule: recurrenceRule || null,
-      recurrenceDays: recurrenceDays.size > 0 ? [...recurrenceDays].sort().join(',') : null,
-    };
-
-    const res = await fetch(`/api/tasks/${task.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      setError('Failed to save.');
-      setSaving(false);
-      return;
-    }
-
-    const updated = await res.json();
-    setTask(updated);
-    setEditing(false);
-    setSaving(false);
   }
 
   async function addSubtask(e: React.FormEvent) {
@@ -208,6 +177,8 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
 
   const subtaskDone = subtasks.filter(s => s.status === 'done').length;
 
+  const inputClass = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white';
+
   return (
     <main className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100 sticky top-0 z-10">
@@ -220,17 +191,39 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
             </Link>
             <h1 className="font-bold text-gray-900 truncate max-w-[200px]">Task Detail</h1>
           </div>
-          <button
-            onClick={() => setEditing(!editing)}
-            className="text-sm text-blue-600 font-medium px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-          >
-            {editing ? 'Cancel' : 'Edit'}
-          </button>
+          <div className="text-xs text-gray-400 flex items-center gap-1.5">
+            {status === 'saving' && (
+              <>
+                <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <span>Saving...</span>
+              </>
+            )}
+            {status === 'saved' && (
+              <>
+                <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-green-600">Saved</span>
+              </>
+            )}
+            {status === 'error' && (
+              <span className="text-red-500">Save failed</span>
+            )}
+          </div>
         </div>
       </header>
 
       <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
-        {error && <div className="bg-red-50 text-red-700 text-sm rounded-xl px-3 py-2">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-700 text-sm rounded-xl px-3 py-2 flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Parent task breadcrumb */}
         {task.parentId != null && (
@@ -256,171 +249,171 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
           )}
         </div>
 
-        {/* Task form */}
+        {/* Task form — always editable, auto-saves on blur */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Title</label>
-            {editing ? (
-              <input
-                type="text"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            ) : (
-              <p className="text-sm font-medium text-gray-900">{task.title}</p>
-            )}
+            <label htmlFor="task-title" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Title</label>
+            <input
+              id="task-title"
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              onBlur={() => { if (title.trim() && title !== task.title) handleFieldChange('title', title); }}
+              className={inputClass}
+            />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Notes</label>
-            {editing ? (
-              <textarea
-                rows={3}
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                placeholder="Any context..."
-              />
-            ) : (
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">{task.description || '—'}</p>
-            )}
+            <label htmlFor="task-notes" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Notes</label>
+            <textarea
+              id="task-notes"
+              rows={3}
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              onBlur={() => handleFieldChange('description', description || undefined as unknown as string)}
+              className={`${inputClass} resize-none`}
+              placeholder="Any context..."
+            />
           </div>
 
-          {/* Category */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Category</label>
-            {editing ? (
-              <input
-                type="text"
-                value={category}
-                onChange={e => setCategory(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g. Temporal, Personal, Marketing"
-              />
-            ) : (
-              <p className="text-sm text-gray-700">{task.category || '—'}</p>
-            )}
+            <label htmlFor="task-category" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Category</label>
+            <input
+              id="task-category"
+              type="text"
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              onBlur={() => handleFieldChange('category', category || null)}
+              className={inputClass}
+              placeholder="e.g. Temporal, Personal, Marketing"
+            />
           </div>
 
-          {/* Assignee */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Assignee</label>
-            {editing ? (
-              <input
-                type="text"
-                value={assignee}
-                onChange={e => setAssignee(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Person responsible"
-              />
-            ) : (
-              <p className="text-sm text-gray-700">{task.assignee || '—'}</p>
-            )}
+            <label htmlFor="task-assignee" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Assignee</label>
+            <input
+              id="task-assignee"
+              type="text"
+              value={assignee}
+              onChange={e => setAssignee(e.target.value)}
+              onBlur={() => handleFieldChange('assignee', assignee || null)}
+              className={inputClass}
+              placeholder="Person responsible"
+            />
           </div>
 
           {/* Priority fields */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Monetary value ($)</label>
-              {editing ? (
-                <input type="number" min={0} value={monetaryValue} onChange={e => setMonetaryValue(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
-              ) : (
-                <p className="text-sm text-gray-700">{task.monetaryValue != null ? `$${task.monetaryValue.toLocaleString()}` : '—'}</p>
-              )}
+              <label htmlFor="task-monetary" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Monetary value ($)</label>
+              <input
+                id="task-monetary"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={monetaryValue}
+                onChange={e => setMonetaryValue(e.target.value)}
+                onBlur={() => handleFieldChange('monetaryValue', monetaryValue ? parseFloat(monetaryValue) : null)}
+                className={inputClass}
+                placeholder="0"
+              />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Revenue potential ($)</label>
-              {editing ? (
-                <input type="number" min={0} value={revenuePotential} onChange={e => setRevenuePotential(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0" />
-              ) : (
-                <p className="text-sm text-gray-700">{task.revenuePotential != null ? `$${task.revenuePotential.toLocaleString()}` : '—'}</p>
-              )}
+              <label htmlFor="task-revenue" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Revenue potential ($)</label>
+              <input
+                id="task-revenue"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={revenuePotential}
+                onChange={e => setRevenuePotential(e.target.value)}
+                onBlur={() => handleFieldChange('revenuePotential', revenuePotential ? parseFloat(revenuePotential) : null)}
+                className={inputClass}
+                placeholder="0"
+              />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Urgency (1-10)</label>
-              {editing ? (
-                <input type="number" min={1} max={10} value={urgency} onChange={e => setUrgency(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="1-10" />
-              ) : (
-                <p className="text-sm text-gray-700">{task.urgency ?? '—'}</p>
-              )}
+              <label htmlFor="task-urgency" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Urgency (1-10)</label>
+              <input
+                id="task-urgency"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10}
+                value={urgency}
+                onChange={e => setUrgency(e.target.value)}
+                onBlur={() => handleFieldChange('urgency', urgency ? parseInt(urgency) : null)}
+                className={inputClass}
+                placeholder="1-10"
+              />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Strategic value (1-10)</label>
-              {editing ? (
-                <input type="number" min={1} max={10} value={strategicValue} onChange={e => setStrategicValue(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="1-10" />
-              ) : (
-                <p className="text-sm text-gray-700">{task.strategicValue ?? '—'}</p>
-              )}
+              <label htmlFor="task-strategic" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Strategic value (1-10)</label>
+              <input
+                id="task-strategic"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10}
+                value={strategicValue}
+                onChange={e => setStrategicValue(e.target.value)}
+                onBlur={() => handleFieldChange('strategicValue', strategicValue ? parseInt(strategicValue) : null)}
+                className={inputClass}
+                placeholder="1-10"
+              />
             </div>
           </div>
 
           {/* Due date */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Due date</label>
-            {editing ? (
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            ) : (
-              <p className="text-sm text-gray-700">
-                {task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-              </p>
-            )}
+            <label htmlFor="task-due" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Due date</label>
+            <input
+              id="task-due"
+              type="date"
+              value={dueDate}
+              onChange={e => {
+                setDueDate(e.target.value);
+                handleFieldChange('dueDate', e.target.value || null);
+              }}
+              className={inputClass}
+            />
           </div>
 
           {/* Recurrence */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Recurrence</label>
-            {editing ? (
-              <div className="space-y-2">
-                <select
-                  value={recurrenceRule}
-                  onChange={e => setRecurrenceRule(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {RECURRENCE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <label htmlFor="task-recurrence" className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Recurrence</label>
+            <div className="space-y-2">
+              <select
+                id="task-recurrence"
+                value={recurrenceRule}
+                onChange={e => {
+                  setRecurrenceRule(e.target.value);
+                  handleFieldChange('recurrenceRule', e.target.value || null);
+                }}
+                className={inputClass}
+              >
+                {RECURRENCE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              {(recurrenceRule === 'weekly' || recurrenceRule === 'biweekly') && (
+                <div className="flex gap-1.5 flex-wrap">
+                  {DAY_NAMES.map((name, i) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => toggleRecurrenceDay(i + 1)}
+                      className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                        recurrenceDays.has(i + 1) ? 'bg-purple-100 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-500'
+                      }`}
+                    >
+                      {name}
+                    </button>
                   ))}
-                </select>
-                {(recurrenceRule === 'weekly' || recurrenceRule === 'biweekly') && (
-                  <div className="flex gap-1.5 flex-wrap">
-                    {DAY_NAMES.map((name, i) => (
-                      <button
-                        key={name}
-                        type="button"
-                        onClick={() => toggleRecurrenceDay(i + 1)}
-                        className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                          recurrenceDays.has(i + 1) ? 'bg-purple-100 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-500'
-                        }`}
-                      >
-                        {name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-700">
-                {task.recurrenceRule
-                  ? formatRecurrenceLabel(task.recurrenceRule, task.recurrenceDays)
-                  : '—'}
-              </p>
-            )}
+                </div>
+              )}
+            </div>
           </div>
-
-          {editing && (
-            <button
-              onClick={saveTask}
-              disabled={saving || !title.trim()}
-              className="w-full bg-blue-600 text-white font-medium rounded-lg py-2.5 text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {saving ? 'Saving...' : 'Save changes'}
-            </button>
-          )}
         </div>
 
         {/* Subtasks section (only for parent tasks) */}
@@ -439,6 +432,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
                   <div key={sub.id} className={`flex items-center gap-2 py-1.5 ${sub.status === 'done' ? 'opacity-50' : ''}`}>
                     <button
                       onClick={() => toggleSubtaskDone(sub)}
+                      aria-label={`Toggle "${sub.title}" as ${sub.status === 'done' ? 'not done' : 'done'}`}
                       className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                         sub.status === 'done' ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-blue-400'
                       }`}
@@ -452,7 +446,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
                     <Link href={`/tasks/${sub.id}`} className={`flex-1 text-sm ${sub.status === 'done' ? 'line-through text-gray-400' : 'text-gray-700 hover:text-blue-600'}`}>
                       {sub.title}
                     </Link>
-                    <button onClick={() => deleteSubtask(sub.id)} className="p-1 text-gray-300 hover:text-red-500">
+                    <button onClick={() => deleteSubtask(sub.id)} className="p-1 text-gray-300 hover:text-red-500" aria-label={`Delete subtask: ${sub.title}`}>
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
@@ -463,7 +457,9 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task }) 
             )}
 
             <form onSubmit={addSubtask} className="flex gap-2">
+              <label htmlFor="add-subtask" className="sr-only">Add subtask</label>
               <input
+                id="add-subtask"
                 type="text"
                 value={subtaskAddTitle}
                 onChange={e => setSubtaskAddTitle(e.target.value)}
