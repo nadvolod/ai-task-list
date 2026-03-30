@@ -28,7 +28,7 @@ function priorityVariant(score: number): 'danger' | 'warning' | 'muted' {
 
 interface TaskCardProps {
   task: Task;
-  children: Task[];
+  subtasks: Task[];
   isExpanded: boolean;
   onToggleExpand: () => void;
   onCycleStatus: (task: Task) => void;
@@ -40,7 +40,7 @@ interface TaskCardProps {
 
 export default function TaskCard({
   task,
-  children: subtasks,
+  subtasks,
   isExpanded,
   onToggleExpand,
   onCycleStatus,

@@ -348,7 +348,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <TaskCard
                   key={task.id}
                   task={task}
-                  children={childrenMap[task.id] ?? []}
+                  subtasks={childrenMap[task.id] ?? []}
                   isExpanded={expandedParents.has(task.id)}
                   onToggleExpand={() => toggleExpand(task.id)}
                   onCycleStatus={cycleStatus}
@@ -370,7 +370,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <TaskCard
                   key={task.id}
                   task={task}
-                  children={childrenMap[task.id] ?? []}
+                  subtasks={childrenMap[task.id] ?? []}
                   isExpanded={expandedParents.has(task.id)}
                   onToggleExpand={() => toggleExpand(task.id)}
                   onCycleStatus={cycleStatus}
@@ -392,7 +392,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 <TaskCard
                   key={task.id}
                   task={task}
-                  children={childrenMap[task.id] ?? []}
+                  subtasks={childrenMap[task.id] ?? []}
                   isExpanded={expandedParents.has(task.id)}
                   onToggleExpand={() => toggleExpand(task.id)}
                   onCycleStatus={cycleStatus}

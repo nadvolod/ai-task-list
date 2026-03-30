@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { Task } from '@/types/task';
-import { formatRecurrenceLabel } from '@/lib/recurrence';
 import { useAutoSave } from '@/hooks/useAutoSave';
 
 const RECURRENCE_OPTIONS = [
@@ -32,7 +31,7 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task; au
     initialTask.recurrenceDays ? new Set(initialTask.recurrenceDays.split(',').map(Number)) : new Set()
   );
 
-  const { save, saveImmediate, status } = useAutoSave(task.id);
+  const { save, status } = useAutoSave(task.id);
 
   // Subtasks state
   const [subtasks, setSubtasks] = useState<Task[]>([]);
