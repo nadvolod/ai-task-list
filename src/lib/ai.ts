@@ -378,6 +378,37 @@ export async function transcribeAndClassifyIntent(
   return { transcription: text, intent };
 }
 
+const CATEGORIES = ['Health', 'Finance', 'Work', 'Business', 'Family', 'Friends', 'Spiritual', 'Fun'] as const;
+
+/**
+ * Auto-categorize a task by title and description using AI.
+ * Returns one of the predefined categories or null if classification fails.
+ */
+export async function autoCategorizeTask(title: string, description?: string | null): Promise<string | null> {
+  try {
+    const client = getClient();
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 50,
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: `Classify the task into exactly ONE of these categories: ${CATEGORIES.join(', ')}. Return ONLY the category name, nothing else.`,
+        },
+        {
+          role: 'user',
+          content: description ? `${title} — ${description}` : title,
+        },
+      ],
+    });
+    const category = response.choices[0]?.message?.content?.trim() ?? '';
+    return CATEGORIES.includes(category as typeof CATEGORIES[number]) ? category : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Generate a spoken response for the CEO using TTS.
  */

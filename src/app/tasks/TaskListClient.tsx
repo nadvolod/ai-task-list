@@ -114,6 +114,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
       setTasks(prev => [...prev, ...(deletedTask ? [deletedTask] : []), ...deletedChildren]);
       showToast('Failed to delete task', { type: 'error' });
     } else {
+      setFocusRefreshKey(k => k + 1);
       showToast('Task deleted', {
         action: {
           label: 'Undo',
@@ -169,6 +170,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
       const newTask = await res.json();
       setTasks(prev => [newTask, ...prev]);
       setQuickAddTitle('');
+      setFocusRefreshKey(k => k + 1);
     } else {
       showToast('Failed to create task', { type: 'error' });
     }
@@ -192,18 +194,22 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
   function handleVoiceTasksCreated(newTasks: Task[]) {
     setTasks(prev => [...newTasks, ...prev]);
+    setFocusRefreshKey(k => k + 1);
   }
 
   function handleVoiceTaskUpdated(updated: Task) {
     setTasks(prev => prev.map(t => t.id === updated.id ? { ...updated, dueDate: updated.dueDate ?? null } : t));
+    setFocusRefreshKey(k => k + 1);
   }
 
   function handleVoiceTaskDeleted(taskId: number) {
     setTasks(prev => prev.filter(t => t.id !== taskId));
+    setFocusRefreshKey(k => k + 1);
   }
 
   function handleAllTasksDeleted() {
     setTasks([]);
+    setFocusRefreshKey(k => k + 1);
   }
 
   async function handleRefreshRequested() {

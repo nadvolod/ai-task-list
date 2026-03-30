@@ -6,6 +6,7 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
+import { autoCategorizeTask } from '@/lib/ai';
 
 export async function GET(req: NextRequest) {
   try {
@@ -116,6 +117,12 @@ export async function POST(req: NextRequest) {
 
     logger.info('POST /api/tasks', { userId, title: body.title, parentId });
 
+    // Auto-categorize if no category provided and not a subtask
+    let category: string | null = typeof body.category === 'string' && body.category.trim() ? body.category.trim() : null;
+    if (!category && !parentId) {
+      category = await autoCategorizeTask(body.title.trim(), body.description);
+    }
+
     const [task] = await db
       .insert(tasks)
       .values({
@@ -135,7 +142,7 @@ export async function POST(req: NextRequest) {
         recurrenceRule: body.recurrenceRule ?? null,
         recurrenceDays: body.recurrenceDays ?? null,
         recurrenceEndDate,
-        category: typeof body.category === 'string' && body.category.trim() ? body.category.trim() : null,
+        category,
         project: typeof body.project === 'string' && body.project.trim() ? body.project.trim() : null,
         assignee: normalizeAssignee(body.assignee) ?? defaultAssigneeFromEmail(auth.email),
       })
