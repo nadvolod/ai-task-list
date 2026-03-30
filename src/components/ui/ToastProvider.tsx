@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 
 export interface ToastAction {
   label: string;
@@ -31,6 +31,13 @@ let nextId = 0;
 
 export default function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach(t => clearTimeout(t));
+    };
+  }, []);
 
   const showToast = useCallback((message: string, options?: { type?: Toast['type']; action?: ToastAction; duration?: number }) => {
     const id = nextId++;
@@ -38,12 +45,16 @@ export default function ToastProvider({ children }: { children: ReactNode }) {
     const toast: Toast = { id, message, type: options?.type ?? 'default', action: options?.action };
     setToasts(prev => [...prev, toast]);
 
-    setTimeout(() => {
+    const exitTimer = setTimeout(() => {
       setToasts(prev => prev.map(t => t.id === id ? { ...t, exiting: true } : t));
-      setTimeout(() => {
+      const removeTimer = setTimeout(() => {
         setToasts(prev => prev.filter(t => t.id !== id));
+        timersRef.current.delete(removeTimer);
       }, 200);
+      timersRef.current.add(removeTimer);
+      timersRef.current.delete(exitTimer);
     }, duration);
+    timersRef.current.add(exitTimer);
   }, []);
 
   return (

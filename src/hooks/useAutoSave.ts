@@ -46,6 +46,7 @@ export function useAutoSave(
 
   const saveImmediate = useCallback(async (fields: Record<string, unknown>) => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    const body = { ...pendingRef.current, ...fields };
     pendingRef.current = {};
     setStatus('saving');
 
@@ -53,7 +54,7 @@ export function useAutoSave(
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fields),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {

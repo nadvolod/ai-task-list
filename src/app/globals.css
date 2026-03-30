@@ -61,6 +61,15 @@ body {
   animation: slide-out-right 0.2s ease-in forwards;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .animate-check-pop,
+  .animate-slide-in,
+  .animate-slide-out,
+  .animate-fade-in {
+    animation: none !important;
+  }
+}
+
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }

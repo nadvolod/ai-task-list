@@ -70,7 +70,7 @@ export default function FocusPanel({ onToggleDone, refreshKey = 0 }: FocusPanelP
   if (focusTasks.length === 0) return null;
 
   return (
-    <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white shadow-sm">
+    <div id="focus" className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white shadow-sm">
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="w-full flex items-center justify-between"

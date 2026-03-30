@@ -55,7 +55,7 @@ export default function TaskCard({
   const [badgesExpanded, setBadgesExpanded] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const { onTouchStart, onTouchMove, onTouchEnd } = useSwipe(
+  const { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } = useSwipe(
     cardRef,
     {
       onSwipeRight: () => onCycleStatus(task),
@@ -158,6 +158,7 @@ export default function TaskCard({
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
       className={`bg-white rounded-xl border border-gray-100 shadow-sm transition-opacity duration-200 ${task.status === 'done' ? 'opacity-60' : ''}`}
     >
       <div className="p-4 space-y-2">
@@ -282,6 +283,7 @@ export default function TaskCard({
                 value={subtaskAddTitle}
                 onChange={e => setSubtaskAddTitle(e.target.value)}
                 placeholder="Add a subtask..."
+                aria-label="Add a subtask"
                 autoFocus
                 className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
               />

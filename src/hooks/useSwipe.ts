@@ -64,5 +64,13 @@ export function useSwipe(
     }
   }, [ref, handlers, threshold]);
 
-  return { onTouchStart, onTouchMove, onTouchEnd };
+  const onTouchCancel = useCallback(() => {
+    stateRef.current.swiping = false;
+    if (ref.current) {
+      ref.current.style.transition = 'transform 0.2s ease-out';
+      ref.current.style.transform = '';
+    }
+  }, [ref]);
+
+  return { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel };
 }

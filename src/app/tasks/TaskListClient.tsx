@@ -128,11 +128,18 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
                 dueDate: deletedTask.dueDate,
                 monetaryValue: deletedTask.monetaryValue,
                 revenuePotential: deletedTask.revenuePotential,
+                revenueType: deletedTask.revenueType,
                 urgency: deletedTask.urgency,
                 strategicValue: deletedTask.strategicValue,
+                confidence: deletedTask.confidence,
+                sourceType: deletedTask.sourceType,
                 category: deletedTask.category,
+                project: deletedTask.project,
                 assignee: deletedTask.assignee,
                 parentId: deletedTask.parentId,
+                recurrenceRule: deletedTask.recurrenceRule,
+                recurrenceDays: deletedTask.recurrenceDays,
+                recurrenceEndDate: deletedTask.recurrenceEndDate,
               }),
             });
             if (restoreRes.ok) {
