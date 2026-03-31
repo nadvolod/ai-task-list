@@ -1,21 +1,22 @@
 'use client';
 
-export type FilterType = 'all' | 'today' | 'overdue' | 'high' | 'doing' | 'recurring' | 'done';
+export type FilterType = 'all' | 'today' | 'overdue' | 'high' | 'doing' | 'waiting' | 'recurring' | 'done';
 
 interface SearchFilterBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   activeFilter: FilterType;
   onFilterChange: (filter: FilterType) => void;
-  counts: { today: number; overdue: number; high: number; recurring?: number; doing?: number };
+  counts: { today: number; overdue: number; high: number; recurring?: number; doing?: number; waiting?: number };
 }
 
-const filters: { key: FilterType; label: string; countKey?: 'today' | 'overdue' | 'high' | 'doing' | 'recurring' }[] = [
+const filters: { key: FilterType; label: string; countKey?: 'today' | 'overdue' | 'high' | 'doing' | 'waiting' | 'recurring' }[] = [
   { key: 'all', label: 'All' },
   { key: 'today', label: 'Due Today', countKey: 'today' },
   { key: 'overdue', label: 'Overdue', countKey: 'overdue' },
   { key: 'high', label: 'High Priority', countKey: 'high' },
   { key: 'doing', label: 'In Progress', countKey: 'doing' },
+  { key: 'waiting', label: 'Waiting', countKey: 'waiting' },
   { key: 'recurring', label: 'Recurring', countKey: 'recurring' },
   { key: 'done', label: 'Done' },
 ];

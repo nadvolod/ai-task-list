@@ -183,7 +183,7 @@ Interpret context clues:
 
 export interface TaskUpdateFields {
   title?: string;
-  status?: 'todo' | 'doing' | 'done';
+  status?: 'todo' | 'doing' | 'waiting' | 'done';
   due_date?: string;
   urgency?: number;
   strategic_value?: number;
@@ -287,6 +287,7 @@ MATCHING RULES:
 - "categorize X as Temporal" or "this is a Temporal task" → update_task with category
 - "I'm working on X" or "I started X" or "X is in progress" → start_task
 - "pause X" or "stop working on X" → update_task with updates.status: "todo"
+- "waiting on X" or "X is blocked" or "X depends on someone" → update_task with updates.status: "waiting"
 - Priority override scale: 95-100 = top priority, 70-90 = high, 40-60 = medium, 10-30 = low
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
 - If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)

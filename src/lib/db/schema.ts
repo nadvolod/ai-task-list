@@ -21,7 +21,7 @@ export const tasks = pgTable('tasks', {
   title: text('title').notNull(),
   description: text('description'),
   sourceType: text('source_type').notNull().default('manual'), // manual | image_upload | voice_context
-  status: text('status').notNull().default('todo'), // todo | doing | done
+  status: text('status').notNull().default('todo'), // todo | doing | waiting | done
   priorityScore: real('priority_score').notNull().default(0),
   priorityReason: text('priority_reason'),
   monetaryValue: real('monetary_value'),

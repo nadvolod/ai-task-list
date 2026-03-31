@@ -6,7 +6,7 @@ test.describe('Status workflow: todo -> doing -> done', () => {
     await login(page);
   });
 
-  test('cycles status through todo -> doing -> done -> todo with server round-trip', async ({ page }) => {
+  test('cycles status through todo -> doing -> done and stays done', async ({ page }) => {
     const taskTitle = `Status test ${Date.now()}`;
     await quickAddTask(page, taskTitle);
 
@@ -15,7 +15,6 @@ test.describe('Status workflow: todo -> doing -> done', () => {
 
     // Click 1: todo -> doing
     await statusBtn.click();
-    // Wait for PATCH to complete, then reload to verify server state
     await page.waitForTimeout(1000);
     await page.reload();
     await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
@@ -32,15 +31,52 @@ test.describe('Status workflow: todo -> doing -> done', () => {
     const cardAfterDone = page.locator(`text=${taskTitle}`).locator('..').locator('..');
     await expect(cardAfterDone.locator('.bg-green-500').first()).toBeVisible({ timeout: 5000 });
 
-    // Click 3: done -> todo
+    // Click 3: done stays done (no cycle back to todo)
     const statusBtn3 = cardAfterDone.locator('button').first();
     await statusBtn3.click();
     await page.waitForTimeout(1000);
     await page.reload();
     await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
-    const cardAfterTodo = page.locator(`text=${taskTitle}`).locator('..').locator('..');
-    await expect(cardAfterTodo.locator('.bg-green-500')).not.toBeVisible();
-    await expect(cardAfterTodo.locator('.bg-amber-500')).not.toBeVisible();
+    const cardStillDone = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await expect(cardStillDone.locator('.bg-green-500').first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('sets Waiting status via detail page and shows in Waiting section', async ({ page }) => {
+    const taskTitle = `Waiting test ${Date.now()}`;
+    await quickAddTask(page, taskTitle);
+
+    // Navigate to task detail
+    const taskCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await taskCard.locator('a[aria-label^="Edit task"]').click();
+    await page.waitForURL(/\/tasks\/\d+/, { timeout: 10_000 });
+
+    // Click the "Waiting" status button
+    await page.click('button:has-text("Waiting")');
+    await page.waitForTimeout(1000);
+
+    // Go back to task list
+    await page.click('a[aria-label="Back to tasks"]');
+    await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
+
+    // Task should appear under "Waiting" section with purple icon
+    const waitingSection = page.locator('text=WAITING').locator('..');
+    await expect(waitingSection).toBeVisible();
+    const waitingCard = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await expect(waitingCard.locator('.bg-purple-500').first()).toBeVisible({ timeout: 5000 });
+
+    // Waiting filter should show the task
+    await page.click('button[role="tab"]:has-text("Waiting")');
+    await page.waitForTimeout(500);
+    await expect(page.locator(`text=${taskTitle}`)).toBeVisible();
+
+    // Clicking status icon on a waiting task should resume to doing
+    const statusBtn = waitingCard.locator('button').first();
+    await statusBtn.click();
+    await page.waitForTimeout(1000);
+    await page.reload();
+    await page.waitForSelector(`text=${taskTitle}`, { timeout: 15_000 });
+    const cardAfterResume = page.locator(`text=${taskTitle}`).locator('..').locator('..');
+    await expect(cardAfterResume.locator('.bg-amber-500').first()).toBeVisible({ timeout: 5000 });
   });
 
   test('In Progress filter shows doing tasks and hides todo tasks', async ({ page }) => {
