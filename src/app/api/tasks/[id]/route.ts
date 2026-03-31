@@ -37,8 +37,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.strategicValue !== undefined && body.strategicValue !== null && (typeof body.strategicValue !== 'number' || body.strategicValue < 1 || body.strategicValue > 10)) {
       return NextResponse.json({ error: 'strategicValue must be between 1 and 10' }, { status: 400 });
     }
-    if (body.status !== undefined && !['todo', 'doing', 'done'].includes(body.status)) {
-      return NextResponse.json({ error: 'status must be "todo", "doing", or "done"' }, { status: 400 });
+    if (body.status !== undefined && !['todo', 'doing', 'waiting', 'done'].includes(body.status)) {
+      return NextResponse.json({ error: 'status must be "todo", "doing", "waiting", or "done"' }, { status: 400 });
     }
     let parsedDueDate: Date | null | undefined = undefined;
     if (body.dueDate !== undefined) {

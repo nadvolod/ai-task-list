@@ -248,6 +248,33 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task; au
           )}
         </div>
 
+        {/* Status picker */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Status</label>
+          <div className="grid grid-cols-4 gap-2">
+            {([
+              { value: 'todo', label: 'To Do', color: 'bg-gray-100 text-gray-700 border-gray-200', activeColor: 'bg-gray-600 text-white border-gray-600' },
+              { value: 'doing', label: 'In Progress', color: 'bg-amber-50 text-amber-700 border-amber-200', activeColor: 'bg-amber-500 text-white border-amber-500' },
+              { value: 'waiting', label: 'Waiting', color: 'bg-purple-50 text-purple-700 border-purple-200', activeColor: 'bg-purple-500 text-white border-purple-500' },
+              { value: 'done', label: 'Done', color: 'bg-green-50 text-green-700 border-green-200', activeColor: 'bg-green-500 text-white border-green-500' },
+            ] as const).map(s => (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => {
+                  setTask(prev => ({ ...prev, status: s.value }));
+                  handleFieldChange('status', s.value);
+                }}
+                className={`text-xs font-medium py-2 rounded-lg border transition-colors ${
+                  task.status === s.value ? s.activeColor : s.color
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Task form — always editable, auto-saves on blur */}
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
           <div>

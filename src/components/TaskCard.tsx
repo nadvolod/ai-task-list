@@ -11,11 +11,13 @@ import { useSwipe } from '@/hooks/useSwipe';
 function nextStatus(current: Task['status']): Task['status'] {
   if (current === 'todo') return 'doing';
   if (current === 'doing') return 'done';
-  return 'todo';
+  if (current === 'waiting') return 'doing';
+  return 'done'; // done stays done — use detail page to change
 }
 
 function statusLabel(status: Task['status']): string {
   if (status === 'doing') return 'in progress';
+  if (status === 'waiting') return 'waiting';
   if (status === 'done') return 'done';
   return 'to do';
 }
@@ -83,18 +85,18 @@ export default function TaskCard({
 
   const now = new Date();
 
-  function dueDateBadge(dueDate: string | null) {
+  function dueDateInfo(dueDate: string | null): { label: string; color: string } | null {
     if (!dueDate) return null;
     const due = new Date(dueDate);
     const diffDays = Math.round((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays < 0) return <Badge variant="danger">Overdue</Badge>;
-    if (diffDays === 0) return <Badge variant="warning">Due today</Badge>;
-    if (diffDays === 1) return <Badge variant="warning">Tomorrow</Badge>;
+    if (diffDays < 0) return { label: 'Overdue', color: 'text-red-600' };
+    if (diffDays === 0) return { label: 'Due today', color: 'text-orange-600' };
+    if (diffDays === 1) return { label: 'Tomorrow', color: 'text-orange-600' };
     if (diffDays <= 7) {
       const dayName = due.toLocaleDateString('en-US', { weekday: 'short' });
-      return <Badge variant="muted">Due {dayName}</Badge>;
+      return { label: `Due ${dayName}`, color: 'text-gray-500' };
     }
-    return <Badge variant="muted" bold={false}>{due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Badge>;
+    return { label: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), color: 'text-gray-500' };
   }
 
   // Build badges array for progressive disclosure
@@ -110,6 +112,10 @@ export default function TaskCard({
     badges.push(<Badge key="doing" variant="amber">In Progress</Badge>);
   }
 
+  if (task.status === 'waiting') {
+    badges.push(<Badge key="waiting" variant="purple">Waiting</Badge>);
+  }
+
   if (hasChildren) {
     badges.push(<Badge key="subtasks" variant="indigo">{childDone}/{subtasks.length}</Badge>);
   }
@@ -122,8 +128,7 @@ export default function TaskCard({
     badges.push(<Badge key="revenue" variant="blue">+${task.revenuePotential.toLocaleString()} potential</Badge>);
   }
 
-  const dueBadge = dueDateBadge(task.dueDate);
-  if (dueBadge) badges.push(<span key="due">{dueBadge}</span>);
+  // Due date is shown in the always-visible metadata row, not in badges
 
   if (task.recurrenceRule) {
     badges.push(
@@ -141,9 +146,7 @@ export default function TaskCard({
     badges.push(<Badge key="category" variant="cyan">{task.category}</Badge>);
   }
 
-  if (task.assignee) {
-    badges.push(<Badge key="assignee" variant="teal">{task.assignee}</Badge>);
-  }
+  // Assignee is shown in the always-visible metadata row, not in badges
 
   if (task.manualPriorityScore != null) {
     badges.push(<Badge key="pinned" variant="amber">Pinned</Badge>);
@@ -200,6 +203,31 @@ export default function TaskCard({
             <p className={`text-sm font-medium leading-snug ${task.status === 'done' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
               {task.title}
             </p>
+
+            {/* Always-visible metadata: assignee & due date */}
+            {(task.assignee || task.dueDate) && (() => {
+              const dueInfo = dueDateInfo(task.dueDate);
+              return (
+                <div className="flex items-center gap-3 mt-1 text-xs">
+                  {task.assignee && (
+                    <span className="flex items-center gap-1 text-teal-700">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      {task.assignee}
+                    </span>
+                  )}
+                  {dueInfo && (
+                    <span className={`flex items-center gap-1 ${dueInfo.color}`}>
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      {dueInfo.label}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Badges row */}
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">

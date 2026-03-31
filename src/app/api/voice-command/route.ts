@@ -149,7 +149,7 @@ function buildTaskUpdates(
   const changes: string[] = [];
   let overrideFn: (() => Promise<void>) | null = null;
 
-  if (intentUpdates.status && ['todo', 'doing', 'done'].includes(intentUpdates.status)) {
+  if (intentUpdates.status && ['todo', 'doing', 'waiting', 'done'].includes(intentUpdates.status)) {
     dbUpdates.status = intentUpdates.status;
     changes.push(`status to ${intentUpdates.status}`);
   }

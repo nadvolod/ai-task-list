@@ -55,7 +55,8 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
   function nextStatus(current: Task['status']): Task['status'] {
     if (current === 'todo') return 'doing';
     if (current === 'doing') return 'done';
-    return 'todo';
+    if (current === 'waiting') return 'doing';
+    return 'done'; // done stays done — use detail page to change
   }
 
   async function cycleStatus(task: Task) {
@@ -242,6 +243,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
   const highCount = topLevelTasks.filter(t => t.status !== 'done' && t.priorityScore >= 60).length;
   const recurringCount = topLevelTasks.filter(t => t.status !== 'done' && t.recurrenceRule != null).length;
   const doingCount = topLevelTasks.filter(t => t.status === 'doing').length;
+  const waitingCount = topLevelTasks.filter(t => t.status === 'waiting').length;
 
   let filtered = topLevelTasks;
 
@@ -250,6 +252,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
   else if (activeFilter === 'high') filtered = filtered.filter(t => t.status !== 'done' && t.priorityScore >= 60);
   else if (activeFilter === 'recurring') filtered = filtered.filter(t => t.status !== 'done' && t.recurrenceRule != null);
   else if (activeFilter === 'doing') filtered = filtered.filter(t => t.status === 'doing');
+  else if (activeFilter === 'waiting') filtered = filtered.filter(t => t.status === 'waiting');
   else if (activeFilter === 'done') filtered = filtered.filter(t => t.status === 'done');
 
   if (debouncedSearch.trim()) {
@@ -265,6 +268,7 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
 
   const byPriority = (a: Task, b: Task) => b.priorityScore - a.priorityScore;
   const inProgress = (activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'doing')).sort(byPriority);
+  const waiting = (activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'waiting')).sort(byPriority);
   const pending = (activeFilter === 'done' ? [] : filtered.filter(t => t.status === 'todo')).sort(byPriority);
   const done = (activeFilter === 'done' ? filtered : (activeFilter === 'all' ? filtered.filter(t => t.status === 'done') : [])).sort(byPriority);
 
@@ -326,11 +330,11 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
           onSearchChange={setSearchQuery}
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
-          counts={{ today: todayCount, overdue: overdueCount, high: highCount, recurring: recurringCount, doing: doingCount }}
+          counts={{ today: todayCount, overdue: overdueCount, high: highCount, recurring: recurringCount, doing: doingCount, waiting: waitingCount }}
         />
 
         {/* Task list */}
-        {inProgress.length === 0 && pending.length === 0 && done.length === 0 && (
+        {inProgress.length === 0 && waiting.length === 0 && pending.length === 0 && done.length === 0 && (
           <EmptyState
             variant={
               debouncedSearch || activeFilter !== 'all'
@@ -345,6 +349,28 @@ export default function TaskListClient({ initialTasks }: { initialTasks: Task[] 
             <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-2">In Progress</p>
             <div className="space-y-2">
               {inProgress.map(task => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  subtasks={childrenMap[task.id] ?? []}
+                  isExpanded={expandedParents.has(task.id)}
+                  onToggleExpand={() => toggleExpand(task.id)}
+                  onCycleStatus={cycleStatus}
+                  onDelete={deleteTask}
+                  onAddSubtask={handleSubtaskAdd}
+                  isDeleting={loading === task.id}
+                  animatedDone={recentlyDone.has(task.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {waiting.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-2">Waiting</p>
+            <div className="space-y-2">
+              {waiting.map(task => (
                 <TaskCard
                   key={task.id}
                   task={task}

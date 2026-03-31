@@ -32,6 +32,16 @@ export default function StatusIcon({ status, size = 'md', animated = false }: St
     );
   }
 
+  if (status === 'waiting') {
+    return (
+      <div className={`${iconSize} rounded-full bg-purple-500 border-2 border-purple-500 flex items-center justify-center`}>
+        <svg className={`${checkSize} text-white`} fill="currentColor" viewBox="0 0 24 24">
+          <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
+        </svg>
+      </div>
+    );
+  }
+
   return (
     <div className={`${iconSize} rounded-full border-2 border-gray-300`} />
   );
