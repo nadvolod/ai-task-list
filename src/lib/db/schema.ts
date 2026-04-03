@@ -49,7 +49,7 @@ export const tasks = pgTable('tasks', {
   shortCode: text('short_code'), // per-user short identifier e.g. "T-1", "T-42"
   manualPriorityScore: real('manual_priority_score'),
   manualPriorityReason: text('manual_priority_reason'),
-  completedAt: timestamp('completed_at'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

@@ -131,8 +131,10 @@ async function migrate() {
   await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS short_code TEXT`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_short_code ON tasks(user_id, short_code)`;
 
-  // Migration: completed_at timestamp for money dashboard
-  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`;
+  // Migration: completed_at timestamp for money dashboard (TIMESTAMPTZ for timezone safety)
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
+  // Ensure column is TIMESTAMPTZ even if previously created as TIMESTAMP
+  await sql`ALTER TABLE tasks ALTER COLUMN completed_at TYPE TIMESTAMPTZ USING completed_at AT TIME ZONE 'UTC'`;
 
   // Backfill completed_at for tasks already marked done
   await sql`UPDATE tasks SET completed_at = updated_at WHERE status = 'done' AND completed_at IS NULL`;
@@ -143,7 +145,7 @@ async function migrate() {
     WITH existing_max AS (
       SELECT user_id, COALESCE(MAX(CAST(SUBSTRING(short_code FROM 3) AS INTEGER)), 0) AS max_num
       FROM tasks
-      WHERE short_code IS NOT NULL AND short_code LIKE 'T-%'
+      WHERE short_code IS NOT NULL AND short_code ~ '^T-[0-9]+$'
       GROUP BY user_id
     ),
     numbered AS (

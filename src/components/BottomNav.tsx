@@ -56,7 +56,7 @@ export default function BottomNav() {
       <div className="max-w-lg mx-auto flex items-center justify-around h-16">
         {tabs.map(tab => {
           const isActive = tab.key === 'tasks'
-            ? pathname === '/tasks'
+            ? pathname === '/tasks' || pathname.startsWith('/tasks/')
             : pathname === tab.href;
 
           return (

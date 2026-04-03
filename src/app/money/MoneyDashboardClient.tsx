@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -23,10 +23,9 @@ import type { Task } from '@/types/task';
 
 type Segment = 'active' | 'done-today' | 'all';
 
-interface MoneyStats {
-  movedToday: number;
-  dealsClosedToday: number;
-  stillInPlay: number;
+/** Effective dollar amount for a task (monetaryValue takes precedence) */
+function dollarAmount(t: Task): number {
+  return t.monetaryValue ?? t.revenuePotential ?? 0;
 }
 
 function nextStatus(current: Task['status']): Task['status'] {
@@ -38,7 +37,6 @@ function nextStatus(current: Task['status']): Task['status'] {
 
 export default function MoneyDashboardClient() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [stats, setStats] = useState<MoneyStats>({ movedToday: 0, dealsClosedToday: 0, stillInPlay: 0 });
   const [segment, setSegment] = useState<Segment>('active');
   const [loading, setLoading] = useState(true);
   const [hasManualOrder, setHasManualOrder] = useState(false);
@@ -55,7 +53,6 @@ export default function MoneyDashboardClient() {
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setTasks(data.tasks);
-      setStats(data.stats);
       setHasManualOrder(data.tasks.some((t: Task) => t.manualOrder != null));
     } catch (err) {
       console.error('Failed to fetch money data', err);
@@ -65,6 +62,22 @@ export default function MoneyDashboardClient() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Compute stats client-side using the user's local timezone
+  const stats = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const completedToday = tasks.filter(
+      t => t.status === 'done' && t.completedAt && new Date(t.completedAt) >= startOfToday,
+    );
+
+    return {
+      movedToday: completedToday.reduce((sum, t) => sum + dollarAmount(t), 0),
+      dealsClosedToday: completedToday.length,
+      stillInPlay: tasks.filter(t => t.status !== 'done').reduce((sum, t) => sum + dollarAmount(t), 0),
+    };
+  }, [tasks]);
 
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -77,14 +90,14 @@ export default function MoneyDashboardClient() {
     return true; // 'all'
   });
 
-  // Sort: manual order first (if any), then by monetary value desc
+  // Sort: manual order first (if any), then by dollar amount desc
   const sortedTasks = [...filteredTasks].sort((a, b) => {
     if (a.manualOrder != null && b.manualOrder != null) {
       return a.manualOrder - b.manualOrder;
     }
     if (a.manualOrder != null) return -1;
     if (b.manualOrder != null) return 1;
-    return (b.monetaryValue ?? 0) - (a.monetaryValue ?? 0);
+    return dollarAmount(b) - dollarAmount(a);
   });
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -96,19 +109,25 @@ export default function MoneyDashboardClient() {
     if (oldIndex === -1 || newIndex === -1) return;
 
     const reordered = arrayMove(sortedTasks, oldIndex, newIndex);
+    const reorderedIds = new Set(reordered.map(t => t.id));
 
-    // Optimistic update: assign sequential manualOrder values
-    const updatedTasks = tasks.map(t => {
-      const idx = reordered.findIndex(r => r.id === t.id);
-      if (idx !== -1) return { ...t, manualOrder: idx };
-      return t;
+    // Build global order: splice reordered segment into existing order
+    const globalOrder = tasks
+      .sort((a, b) => (a.manualOrder ?? Infinity) - (b.manualOrder ?? Infinity));
+    let reorderedIdx = 0;
+    const fullOrdered = globalOrder.map(t => {
+      if (!reorderedIds.has(t.id)) return t;
+      return reordered[reorderedIdx++];
     });
+
+    // Assign sequential manualOrder to all tasks
+    const updatedTasks = fullOrdered.map((t, idx) => ({ ...t, manualOrder: idx }));
     setTasks(updatedTasks);
     setHasManualOrder(true);
 
-    // Persist all reordered tasks
-    await Promise.all(
-      reordered.map((t, idx) =>
+    // Persist — use allSettled to handle partial failures
+    const results = await Promise.allSettled(
+      updatedTasks.map((t, idx) =>
         fetch(`/api/tasks/${t.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -116,10 +135,17 @@ export default function MoneyDashboardClient() {
         }),
       ),
     );
+
+    if (results.some(r => r.status === 'rejected')) {
+      console.error('Some reorder updates failed, refetching');
+      fetchData();
+    }
   }
 
   async function handleCycleStatus(task: Task) {
     const newStatus = nextStatus(task.status);
+    const previousTask = { ...task };
+
     // Optimistic update
     setTasks(prev =>
       prev.map(t =>
@@ -133,15 +159,23 @@ export default function MoneyDashboardClient() {
       ),
     );
 
-    const res = await fetch(`/api/tasks/${task.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
 
-    if (res.ok) {
-      // Refetch to get updated stats
+      if (!res.ok) throw new Error('Failed to update status');
+      // Refetch to sync server state
       fetchData();
+    } catch {
+      // Revert optimistic update
+      setTasks(prev =>
+        prev.map(t =>
+          t.id === task.id ? { ...t, status: previousTask.status, completedAt: previousTask.completedAt } : t,
+        ),
+      );
     }
   }
 
@@ -150,7 +184,7 @@ export default function MoneyDashboardClient() {
     const updatedTasks = tasks.map(t => ({ ...t, manualOrder: null }));
     setTasks(updatedTasks);
 
-    await Promise.all(
+    await Promise.allSettled(
       tasks
         .filter(t => t.manualOrder != null)
         .map(t =>
