@@ -188,7 +188,12 @@ export default function TaskDetailClient({ task: initialTask }: { task: Task; au
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
             </Link>
-            <h1 className="font-bold text-gray-900 truncate max-w-[200px]">Task Detail</h1>
+            <h1 className="font-bold text-gray-900 truncate max-w-[200px]">
+              {task.shortCode && (
+                <span className="inline-block text-xs font-mono font-semibold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded mr-2 align-middle">{task.shortCode}</span>
+              )}
+              Task Detail
+            </h1>
           </div>
           <div className="text-xs text-gray-400 flex items-center gap-1.5">
             {status === 'saving' && (

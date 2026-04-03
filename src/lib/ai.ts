@@ -217,9 +217,17 @@ export type VoiceIntent = VoiceIntentBase & {
   ambiguities?: string[];
 };
 
-function buildClassificationPrompt(existingTaskTitles: string[], currentDate?: string): string {
-  const taskListContext = existingTaskTitles.length > 0
-    ? `\nThe user's current tasks are:\n${existingTaskTitles.map((t, i) => `${i + 1}. "${t}"`).join('\n')}`
+export interface TaskContext {
+  title: string;
+  shortCode: string | null;
+}
+
+function buildClassificationPrompt(existingTasks: TaskContext[], currentDate?: string): string {
+  const taskListContext = existingTasks.length > 0
+    ? `\nThe user's current tasks are:\n${existingTasks.map((t, i) => {
+        const code = t.shortCode ? ` (${t.shortCode})` : '';
+        return `${i + 1}. "${t.title}"${code}`;
+      }).join('\n')}`
     : '\nThe user has no tasks yet.';
 
   return `You are a voice command router for a CEO's task management app. Classify the user's spoken input into one of these intents and return ONLY valid JSON.
@@ -230,7 +238,7 @@ ${taskListContext}
 INTENTS:
 
 1. create_tasks — User wants to add new tasks
-   {"intent":"create_tasks","tasks":[{"title":"...","description":"...","monetary_value":N,"revenue_potential":N,"urgency":1-10,"strategic_value":1-10,"due_date":"YYYY-MM-DD"}]}
+   {"intent":"create_tasks","tasks":[{"title":"...","description":"...","status":"todo|doing|waiting|done","monetary_value":N,"revenue_potential":N,"urgency":1-10,"strategic_value":1-10,"due_date":"YYYY-MM-DD","assignee":"person name","category":"area","subtasks":[{"title":"..."}]}]}
 
 2. complete_task — User wants to mark a task as done
    {"intent":"complete_task","task_query":"search string to match task title"}
@@ -296,6 +304,11 @@ MATCHING RULES:
 - Subtask disambiguation: When the user says "with subtasks", uses a colon followed by a list, or says "which involves" → create ONE parent task with a subtasks array. When items are clearly independent ("and also", separate sentences about unrelated work) → create separate top-level tasks in create_tasks.
 - Priority inference: Infer urgency from context phrases. "blocking launch"/"critical"/"showstopper" → urgency 9-10. "ASAP"/"urgent" → urgency 8-9. "important"/"high priority" → urgency 7-8. "nice to have"/"not a rush"/"low priority" → urgency 2-3.
 - Relative dates: "end of month" → last calendar day of current month. "end of week" → Friday of current week. "in N days" → today + N calendar days. "next [weekday]" → the upcoming occurrence of that weekday AFTER today.
+- STATUS on new tasks: When creating tasks, set status if the user specifies one. "put it in waiting"/"I'm waiting on"/"waiting for X" → status: "waiting". "it's in progress"/"I'm already working on it"/"start working on" → status: "doing". "it's already done" → status: "done". If no status mentioned, omit the field (defaults to "todo").
+- Compound create example: "Create a new task for finding home insurance for Devenshire and put it in waiting status and I'm waiting for Julian and his team" → create_tasks with title: "Find home insurance for Devenshire", status: "waiting", assignee: "Julian and his team".
+- Compound create example: "Create a task for the Acme proposal, assign to Sarah, due Friday, it's in waiting, urgent" → create_tasks with status: "waiting", assignee: "Sarah", due_date: next Friday, urgency: 8.
+- Short code references: Users can reference tasks by their short code (shown as T-N). "T-5", "task 5", "task number 5" → task_query: "T-5". Always prefer short code match when the user says a number that matches a code.
+- "Start a new task to X" when no existing task matches X → create_tasks with status: "doing" (not start_task, since there's nothing to start).
 
 CLARIFICATION RULES:
 - Add "needs_confirmation": true and "ambiguities": ["description of ambiguity"] to your JSON response when:
@@ -327,16 +340,20 @@ function parseIntentResponse(content: string, fallbackText: string): VoiceIntent
  */
 export async function classifyTextIntent(
   text: string,
-  existingTaskTitles: string[],
+  existingTasks: TaskContext[] | string[],
   currentDate?: string
 ): Promise<VoiceIntent> {
+  // Normalize: accept string[] for backward compat (tests)
+  const normalized: TaskContext[] = existingTasks.map(t =>
+    typeof t === 'string' ? { title: t, shortCode: null } : t
+  );
   const client = getClient();
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     max_tokens: 2000,
     temperature: 0.1,
     messages: [
-      { role: 'system', content: buildClassificationPrompt(existingTaskTitles, currentDate) },
+      { role: 'system', content: buildClassificationPrompt(normalized, currentDate) },
       { role: 'user', content: text },
     ],
   });
@@ -351,7 +368,7 @@ export async function classifyTextIntent(
 export async function transcribeAndClassifyIntent(
   audioBuffer: Buffer,
   filename: string,
-  existingTaskTitles: string[]
+  existingTasks: TaskContext[]
 ): Promise<{ transcription: string; intent: VoiceIntent }> {
   const client = getClient();
 
@@ -368,7 +385,7 @@ export async function transcribeAndClassifyIntent(
     max_tokens: 2000,
     temperature: 0.1,
     messages: [
-      { role: 'system', content: buildClassificationPrompt(existingTaskTitles) },
+      { role: 'system', content: buildClassificationPrompt(existingTasks) },
       { role: 'user', content: text },
     ],
   });
@@ -428,6 +445,7 @@ export async function generateSpeech(text: string): Promise<Buffer> {
 export interface VoiceCapturedTask {
   title: string;
   description?: string;
+  status?: 'todo' | 'doing' | 'waiting' | 'done';
   monetary_value?: number;
   revenue_potential?: number;
   urgency?: number;
@@ -470,6 +488,7 @@ export async function transcribeAndCreateTasks(
 [{
   "title": "concise task title",
   "description": "any additional context mentioned" or null,
+  "status": "todo"|"doing"|"waiting"|"done" or null,
   "monetary_value": number or null,
   "revenue_potential": number or null,
   "urgency": 1-10 or null,
@@ -500,6 +519,7 @@ Rules:
 - Interpret relative dates: "tomorrow", "Friday", "next week", "end of month"
 - ONLY set due_date when the user explicitly mentions a deadline or time constraint. Do NOT infer today's date. "I need to call John" → due_date: null. "Call John by Friday" → due_date: next Friday.
 - If no assignee is mentioned, omit the assignee field entirely (the system defaults to the current user)
+- STATUS: Set status when the user specifies one. "put it in waiting"/"I'm waiting on"/"waiting for X" → status: "waiting". "it's in progress"/"already working on" → status: "doing". "it's already done" → status: "done". If no status mentioned, omit (defaults to "todo").
 - Keep titles concise and actionable
 - Return valid JSON array only, no markdown`,
       },

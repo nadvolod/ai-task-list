@@ -25,6 +25,7 @@ interface GoldExpectedTask {
   urgency_max?: number;
   monetary_value_min?: number;
   category_contains?: string;
+  status?: string;
 }
 
 interface GoldExpectedOutput {
@@ -67,19 +68,21 @@ interface EvalResult {
   subtask_score: number;
   priority_score: number;
   clarification_score: number;
+  status_score: number;
   overall_score: number;
 }
 
-// --- Scoring weights (from issue #22) ---
+// --- Scoring weights (from issue #22, updated #39 for status) ---
 const WEIGHTS = {
   intent: 0.20,
   title: 0.15,
-  due_date: 0.15,
+  due_date: 0.13,
   owner: 0.10,
-  subtasks: 0.10,
+  subtasks: 0.08,
   task_count: 0.05,
-  clarification: 0.15,
-  priority: 0.10,
+  clarification: 0.14,
+  priority: 0.08,
+  status: 0.07,
 };
 
 // --- Evaluators ---
@@ -212,6 +215,21 @@ function categoryScore(expectedTasks: GoldExpectedTask[] | undefined, actualTask
   return matched / tasksWithCategory.length;
 }
 
+function statusScoreFn(expectedTasks: GoldExpectedTask[] | undefined, actualTasks: unknown[]): number {
+  if (!expectedTasks) return 1;
+  const tasksWithStatus = expectedTasks.filter(t => t.status);
+  if (tasksWithStatus.length === 0) return 1;
+  let matched = 0;
+  for (const exp of tasksWithStatus) {
+    const found = actualTasks.some((t: unknown) => {
+      const task = t as Record<string, unknown>;
+      return String(task.status ?? '') === exp.status;
+    });
+    if (found) matched++;
+  }
+  return matched / tasksWithStatus.length;
+}
+
 // --- Evaluate update intents ---
 
 function evaluateUpdateIntent(gold: GoldTestCase, actual: Record<string, unknown>): EvalResult {
@@ -226,6 +244,7 @@ function evaluateUpdateIntent(gold: GoldTestCase, actual: Record<string, unknown
     subtask_score: 1,
     priority_score: 1,
     clarification_score: 1,
+    status_score: 1,
     overall_score: 0,
   };
 
@@ -256,6 +275,9 @@ function evaluateUpdateIntent(gold: GoldTestCase, actual: Record<string, unknown
       const actual_po = Number(actualUpdates.priority_override ?? 100);
       result.priority_score = actual_po <= maxVal ? 1 : 0;
     }
+    if ('status' in expUpdates) {
+      result.status_score = String(actualUpdates.status ?? '') === String(expUpdates.status) ? 1 : 0;
+    }
   }
 
   result.overall_score = computeOverall(result);
@@ -276,6 +298,7 @@ function evaluateBatchIntent(gold: GoldTestCase, actual: Record<string, unknown>
     subtask_score: 1,
     priority_score: 1,
     clarification_score: 1,
+    status_score: 1,
     overall_score: 0,
   };
 
@@ -334,7 +357,8 @@ function computeOverall(r: EvalResult): number {
     r.subtask_score * WEIGHTS.subtasks +
     (r.task_count_match ? 1 : 0) * WEIGHTS.task_count +
     r.clarification_score * WEIGHTS.clarification +
-    r.priority_score * WEIGHTS.priority
+    r.priority_score * WEIGHTS.priority +
+    r.status_score * WEIGHTS.status
   );
 }
 
@@ -360,6 +384,8 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
       owner_score: 1,
       subtask_score: 1,
       priority_score: 1,
+      clarification_score: 1,
+      status_score: 1,
       overall_score: 0,
     };
 
@@ -386,6 +412,7 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
     subtask_score: 1,
     priority_score: 1,
     clarification_score: 1,
+    status_score: 1,
     overall_score: 0,
   };
 
@@ -410,6 +437,9 @@ function evaluateCase(gold: GoldTestCase, actual: Record<string, unknown>): Eval
   } else {
     result.priority_score = pScore;
   }
+
+  // Status scoring
+  result.status_score = statusScoreFn(exp.tasks, actualTasks);
 
   result.overall_score = computeOverall(result);
   return result;
@@ -438,7 +468,7 @@ describe('Voice-to-task evaluation harness', () => {
   });
 
   it('gold dataset loads correctly', () => {
-    expect(goldCases.length).toBeGreaterThanOrEqual(39);
+    expect(goldCases.length).toBeGreaterThanOrEqual(48);
     for (const c of goldCases) {
       expect(c.id).toBeTruthy();
       expect(c.scenario_bucket).toBeTruthy();
@@ -475,10 +505,11 @@ describe('Voice-to-task evaluation harness', () => {
       'Owner'.padEnd(7),
       'Subs'.padEnd(7),
       'Pri'.padEnd(7),
+      'Stat'.padEnd(7),
       'Clar'.padEnd(7),
       'Overall'
     );
-    console.log('-'.repeat(120));
+    console.log('-'.repeat(130));
 
     for (const r of results) {
       console.log(
@@ -491,6 +522,7 @@ describe('Voice-to-task evaluation harness', () => {
         r.owner_score.toFixed(2).padEnd(7),
         r.subtask_score.toFixed(2).padEnd(7),
         r.priority_score.toFixed(2).padEnd(7),
+        r.status_score.toFixed(2).padEnd(7),
         r.clarification_score.toFixed(2).padEnd(7),
         r.overall_score.toFixed(2)
       );
