@@ -7,6 +7,7 @@ import { reprioritizeAllTasks } from '@/lib/priority';
 import { logger } from '@/lib/logger';
 import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
 import { autoCategorizeTask } from '@/lib/ai';
+import { nextShortCode } from '@/lib/short-code';
 
 export async function GET(req: NextRequest) {
   try {
@@ -123,11 +124,14 @@ export async function POST(req: NextRequest) {
       category = await autoCategorizeTask(body.title.trim(), body.description);
     }
 
+    const shortCode = await nextShortCode(userId);
+
     const [task] = await db
       .insert(tasks)
       .values({
         userId,
         title: body.title.trim(),
+        shortCode,
         description: body.description,
         sourceType: body.sourceType ?? 'manual',
         monetaryValue: body.monetaryValue,

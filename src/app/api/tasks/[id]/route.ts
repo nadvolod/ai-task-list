@@ -104,6 +104,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       logger.info('Task status changed', { taskId, from: current.status, to: newStatus });
     }
 
+    // Track completedAt: set when transitioning to done, clear when leaving done
+    let newCompletedAt = current.completedAt;
+    if (body.status !== undefined && body.status !== current.status) {
+      if (body.status === 'done') {
+        newCompletedAt = new Date();
+      } else if (current.status === 'done') {
+        newCompletedAt = null;
+      }
+    }
+
     await db
       .update(tasks)
       .set({
@@ -125,6 +135,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         recurrenceActive: newRecurrenceActive,
         manualPriorityScore: newManualPriorityScore,
         manualPriorityReason: newManualPriorityReason,
+        completedAt: newCompletedAt,
         updatedAt: new Date(),
       })
       .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
@@ -133,7 +144,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.status === 'done' && current.parentId === null) {
       await db
         .update(tasks)
-        .set({ status: 'done', updatedAt: new Date() })
+        .set({ status: 'done', completedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(tasks.parentId, taskId), eq(tasks.userId, userId)));
     }
 
@@ -145,7 +156,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const allDone = siblings.every(s => s.id === taskId ? true : s.status === 'done');
       if (allDone) {
         await db.update(tasks)
-          .set({ status: 'done', updatedAt: new Date() })
+          .set({ status: 'done', completedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(tasks.id, current.parentId), eq(tasks.userId, userId)));
         parentAutoCompleted = true;
       }

@@ -3,7 +3,7 @@ import { getAuthUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { tasks, taskEvents } from '@/lib/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
-import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent, type TaskUpdateFields } from '@/lib/ai';
+import { transcribeAndClassifyIntent, generateSpeech, type VoiceIntent, type TaskUpdateFields, type TaskContext } from '@/lib/ai';
 import { reprioritizeAllTasks } from '@/lib/priority';
 import { spawnNextRecurringInstance } from '@/lib/task-operations';
 import { priorityOverrides } from '@/lib/db/schema';
@@ -29,15 +29,26 @@ interface TaskRow {
   recurrenceParentId: number | null;
   recurrenceActive: string | null;
   assignee: string | null;
+  shortCode: string | null;
   manualPriorityScore: number | null;
   manualPriorityReason: string | null;
 }
 
 function fuzzyMatch(query: string, tasks: TaskRow[]): TaskRow | null {
-  const q = query.toLowerCase();
-  // Exact substring match first
+  const q = query.toLowerCase().trim();
+
+  // Short code match: "T-5", "t5", "task 5", "task number 5"
+  const codeMatch = q.match(/^(?:t-?|task\s*(?:number\s*)?)(\d+)$/i);
+  if (codeMatch) {
+    const code = `T-${codeMatch[1]}`;
+    const found = tasks.find(t => t.shortCode === code);
+    if (found) return found;
+  }
+
+  // Exact substring match
   const exact = tasks.find(t => t.title.toLowerCase().includes(q));
   if (exact) return exact;
+
   // Word overlap match
   const queryWords = q.split(/\s+/).filter(w => w.length > 2);
   let bestMatch: TaskRow | null = null;
@@ -82,7 +93,10 @@ export async function POST(req: NextRequest) {
       .where(eq(tasks.userId, userId))
       .orderBy(desc(tasks.priorityScore));
 
-    const taskTitles = userTasks.map(t => t.title);
+    const taskContexts: TaskContext[] = userTasks.map(t => ({
+      title: t.title,
+      shortCode: t.shortCode,
+    }));
 
     // Transcribe and classify intent
     const arrayBuffer = await audioFile.arrayBuffer();
@@ -90,7 +104,7 @@ export async function POST(req: NextRequest) {
     const { transcription, intent } = await transcribeAndClassifyIntent(
       buffer,
       audioFile.name || 'audio.webm',
-      taskTitles
+      taskContexts
     );
 
     logger.info('Voice command classified', { userId, intent: intent.intent, transcription: transcription.substring(0, 100) });
@@ -126,6 +140,27 @@ export async function POST(req: NextRequest) {
 }
 
 import { defaultAssigneeFromEmail, normalizeAssignee } from '@/lib/assignee';
+import { nextShortCode } from '@/lib/short-code';
+
+function buildCreatedTaskResponse(t: TaskRow): string {
+  const parts = [`Got it. Added ${t.shortCode ? t.shortCode + ': ' : ''}"${t.title}"`];
+  if (t.assignee) parts.push(`assigned to ${t.assignee}`);
+  if (t.status && t.status !== 'todo') parts.push(`status ${t.status === 'doing' ? 'in progress' : t.status}`);
+  if (t.dueDate) parts.push(`due ${formatDueDate(t.dueDate)}`);
+  parts.push(`priority score ${Math.round(t.priorityScore)}`);
+  return parts.join(', ') + '.';
+}
+
+function buildCreatedTaskBrief(t: TaskRow): string {
+  const parts = [t.shortCode ? `${t.shortCode} "${t.title}"` : `"${t.title}"`];
+  if (t.assignee) parts.push(`→ ${t.assignee}`);
+  if (t.status && t.status !== 'todo') parts.push(t.status === 'doing' ? 'in progress' : t.status);
+  return parts.join(', ');
+}
+
+function taskLabel(t: TaskRow): string {
+  return t.shortCode ? `${t.shortCode} ${t.title}` : t.title;
+}
 
 interface CommandResult {
   action: string;
@@ -229,6 +264,7 @@ async function executeIntent(
 
   switch (intent.intent) {
     case 'create_tasks': {
+      const validStatuses = ['todo', 'doing', 'waiting', 'done'];
       const createdTasks: TaskRow[] = [];
       for (const parsed of intent.tasks) {
         if (!parsed.title?.trim()) continue;
@@ -243,10 +279,12 @@ async function executeIntent(
         const revenuePotential = typeof parsed.revenue_potential === 'number' && parsed.revenue_potential >= 0 ? parsed.revenue_potential : null;
         const urgency = typeof parsed.urgency === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.urgency))) : null;
         const strategicValue = typeof parsed.strategic_value === 'number' ? Math.max(1, Math.min(10, Math.round(parsed.strategic_value))) : null;
+        const status = parsed.status && validStatuses.includes(parsed.status) ? parsed.status : 'todo';
+        const shortCode = await nextShortCode(userId);
 
         const [task] = await db.insert(tasks).values({
           userId, title: parsed.title.trim(), description: parsed.description || null,
-          sourceType: 'voice_context', monetaryValue, revenuePotential, urgency, strategicValue,
+          sourceType: 'voice_context', status, shortCode, monetaryValue, revenuePotential, urgency, strategicValue,
           dueDate,
           assignee: normalizeAssignee(parsed.assignee) ?? defaultAssignee,
           category: parsed.category ?? null,
@@ -275,12 +313,11 @@ async function executeIntent(
       }
 
       const count = refreshed.length;
-      const titles = refreshed.map(t => t.title).join(', ');
       return {
         action: 'created',
         spokenResponse: count === 1
-          ? `Got it. Added "${refreshed[0].title}" with priority score ${Math.round(refreshed[0].priorityScore)}.`
-          : `Created ${count} tasks: ${titles}.`,
+          ? buildCreatedTaskResponse(refreshed[0])
+          : `Created ${count} tasks: ${refreshed.map(t => buildCreatedTaskBrief(t)).join('. ')}.`,
         tasksCreated: refreshed,
       };
     }
@@ -299,7 +336,7 @@ async function executeIntent(
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)));
 
       const [updated] = await db.update(tasks)
-        .set({ status: 'done', updatedAt: new Date() })
+        .set({ status: 'done', completedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(tasks.id, match.id), eq(tasks.userId, userId)))
         .returning();
 
@@ -309,7 +346,7 @@ async function executeIntent(
       // Also complete subtasks if this is a parent task
       if (fullTask.parentId === null) {
         await db.update(tasks)
-          .set({ status: 'done', updatedAt: new Date() })
+          .set({ status: 'done', completedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(tasks.parentId, match.id), eq(tasks.userId, userId)));
       }
 
@@ -437,11 +474,13 @@ async function executeIntent(
 
           for (const sub of item.subtasks) {
             if (!sub.title?.trim()) continue;
+            const subCode = await nextShortCode(userId);
             await db.insert(tasks).values({
               userId,
               title: sub.title.trim(),
               description: sub.description || null,
               sourceType: 'voice_context',
+              shortCode: subCode,
               parentId: match.id,
               subtaskOrder: nextOrder++,
             });
@@ -536,7 +575,7 @@ async function executeIntent(
       const overdueCount = pendingTasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date()).length;
 
       const taskDescriptions = top3.map((t, i) => {
-        const parts = [`${i + 1}. ${t.title}`];
+        const parts = [`${i + 1}. ${taskLabel(t)}`];
         if (t.dueDate) parts.push(formatDueDate(t.dueDate));
         if (t.monetaryValue) parts.push(`$${t.monetaryValue.toLocaleString()} at stake`);
         return parts.join(', ');
@@ -585,7 +624,7 @@ async function executeIntent(
 
       const maxRead = 5;
       const taskNames = filtered.slice(0, maxRead).map((t, i) => {
-        const parts = [`${i + 1}. ${t.title}`];
+        const parts = [`${i + 1}. ${taskLabel(t)}`];
         if (t.dueDate) parts.push(formatDueDate(t.dueDate));
         return parts.join(', ');
       }).join('. ');

@@ -201,6 +201,9 @@ export default function TaskCard({
           {/* Task content */}
           <div className="flex-1 min-w-0">
             <p className={`text-sm font-medium leading-snug ${task.status === 'done' ? 'line-through text-gray-400' : 'text-gray-900'}`}>
+              {task.shortCode && (
+                <span className="inline-block text-xs font-mono font-semibold text-indigo-500 mr-1.5">{task.shortCode}</span>
+              )}
               {task.title}
             </p>
 

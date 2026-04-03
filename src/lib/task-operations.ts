@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { tasks } from '@/lib/db/schema';
 import { computeNextDueDate, shouldCreateNextInstance, type RecurrenceConfig } from '@/lib/recurrence';
+import { nextShortCode } from '@/lib/short-code';
 
 /**
  * When a recurring task is completed, spawn the next instance.
@@ -23,11 +24,14 @@ export async function spawnNextRecurringInstance(
   const nextDue = computeNextDueDate(current.dueDate, config);
   const recurrenceParentId = current.recurrenceParentId ?? current.id;
 
+  const shortCode = await nextShortCode(current.userId);
+
   const [newTask] = await db.insert(tasks).values({
     userId: current.userId,
     title: current.title,
     description: current.description,
     sourceType: current.sourceType,
+    shortCode,
     monetaryValue: current.monetaryValue,
     revenuePotential: current.revenuePotential,
     urgency: current.urgency,
