@@ -127,6 +127,38 @@ async function migrate() {
   // Migration: revenue type field (Issue #27) — 'onetime' | 'mrr' | 'arr'
   await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS revenue_type TEXT`;
 
+  // Migration: short code identifiers (Issue #39) — per-user task references like "T-1"
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS short_code TEXT`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_short_code ON tasks(user_id, short_code)`;
+
+  // Migration: completed_at timestamp for money dashboard
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`;
+
+  // Backfill completed_at for tasks already marked done
+  await sql`UPDATE tasks SET completed_at = updated_at WHERE status = 'done' AND completed_at IS NULL`;
+
+  // Backfill existing tasks with sequential short codes per user
+  // Uses per-user max to avoid duplicate key conflicts with existing codes
+  await sql`
+    WITH existing_max AS (
+      SELECT user_id, COALESCE(MAX(CAST(SUBSTRING(short_code FROM 3) AS INTEGER)), 0) AS max_num
+      FROM tasks
+      WHERE short_code IS NOT NULL AND short_code LIKE 'T-%'
+      GROUP BY user_id
+    ),
+    numbered AS (
+      SELECT t.id, t.user_id,
+        ROW_NUMBER() OVER (PARTITION BY t.user_id ORDER BY t.created_at) + COALESCE(em.max_num, 0) AS rn
+      FROM tasks t
+      LEFT JOIN existing_max em ON em.user_id = t.user_id
+      WHERE t.short_code IS NULL
+    )
+    UPDATE tasks
+    SET short_code = 'T-' || numbered.rn
+    FROM numbered
+    WHERE tasks.id = numbered.id
+  `;
+
   console.log('Migration complete!');
 }
 

@@ -27,6 +27,10 @@ export interface Task {
   project: string | null;
   // Assignee & priority override (Issue #11)
   assignee: string | null;
+  shortCode: string | null;
   manualPriorityScore: number | null;
   manualPriorityReason: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+  manualOrder: number | null;
 }

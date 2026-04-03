@@ -23,6 +23,7 @@ export default async function TasksPage() {
     status: t.status as Task['status'],
     dueDate: t.dueDate?.toISOString() ?? null,
     recurrenceEndDate: t.recurrenceEndDate?.toISOString() ?? null,
+    completedAt: t.completedAt?.toISOString() ?? null,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
   }));

@@ -29,6 +29,7 @@ export default async function TaskDetailPage({ params, searchParams }: { params:
     status: task.status as Task['status'],
     dueDate: task.dueDate?.toISOString() ?? null,
     recurrenceEndDate: task.recurrenceEndDate?.toISOString() ?? null,
+    completedAt: task.completedAt?.toISOString() ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   };
