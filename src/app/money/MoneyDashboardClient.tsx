@@ -112,7 +112,7 @@ export default function MoneyDashboardClient() {
     const reorderedIds = new Set(reordered.map(t => t.id));
 
     // Build global order: splice reordered segment into existing order
-    const globalOrder = tasks
+    const globalOrder = [...tasks]
       .sort((a, b) => (a.manualOrder ?? Infinity) - (b.manualOrder ?? Infinity));
     let reorderedIdx = 0;
     const fullOrdered = globalOrder.map(t => {
